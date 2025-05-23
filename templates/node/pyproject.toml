@@ -1,0 +1,16 @@
+# pyproject.tom
+[project]
+name = "{{NodeName}}"
+authors = ["{{Author}}"]
+description = "{{NodeDesc}}"
+version = "{{Version}}"
+
+license = {text = "{{License}}"}
+dependencies  = ["{{Dependencies}}"]
+[project.urls]
+Repository = ""
+
+[tool.comfy]
+PublisherId = "{{PublisherId}}"
+DisplayName = "{{DisplayName}}"
+Icon = ""
