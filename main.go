@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/joho/godotenv"
 )
 
@@ -51,21 +50,6 @@ const (
 	comfyUIRepoURL        = "https://github.com/comfyanonymous/ComfyUI.git"
 )
 
-// Styles and related variables
-var (
-	docStyle                = lipgloss.NewStyle().Margin(1, 2)
-	titleStyle              = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")) // Light Purple
-	successStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("40"))            // Green
-	errorStyle              = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))           // Red
-	infoStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))            // Blue
-	warningStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))           // Orange
-	spinnerStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("69"))
-	spinnerFrames           = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	pythonExecutable        = "python"
-	pythonExecutableWindows = "python.exe"
-)
-
-// paths struct to hold all relevant paths
 type paths struct {
 	cliDir          string // Directory where the CLI executable is running
 	envFile         string // Path to the .env file
@@ -116,7 +100,7 @@ func initPaths() error {
 	// Load .env file from CLI directory
 	err = godotenv.Load(appPaths.envFile)
 	if err != nil {
-		if (!os.IsNotExist(err)) {
+		if !os.IsNotExist(err) {
 			fmt.Println(warningStyle.Render(fmt.Sprintf("Warning: Could not load .env file at %s: %v", appPaths.envFile, err)))
 		}
 		// If .env does not exist, it's not an error yet.
@@ -531,7 +515,7 @@ func installComfyUI() {
 	// Handle existing directory for installationPath
 	targetInfo, err := os.Stat(installPath)
 	if err == nil { // Path exists
-		if (!targetInfo.IsDir()) {
+		if !targetInfo.IsDir() {
 			fmt.Println(errorStyle.Render(fmt.Sprintf("Error: The path %s exists but is a file, not a directory. Please choose a different path or remove the file.", installPath)))
 			return
 		}
