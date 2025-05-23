@@ -680,6 +680,9 @@ func executeCommand(commandName string, args []string, workDir string, logFilePa
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 
+		// Only set SysProcAttr.Setsid on Unix (not Windows)
+		// This avoids build errors on Windows where Setsid is not available.
+		// +build !windows
 		if runtime.GOOS != "windows" {
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		}
