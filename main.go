@@ -12,6 +12,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//go:build !windows
+// +build !windows
+
 package main
 
 import (
@@ -682,7 +685,6 @@ func executeCommand(commandName string, args []string, workDir string, logFilePa
 
 		// Only set SysProcAttr.Setsid on Unix (not Windows)
 		// This avoids build errors on Windows where Setsid is not available.
-		// +build !windows
 		if runtime.GOOS != "windows" {
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		}
