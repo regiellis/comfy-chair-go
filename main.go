@@ -51,7 +51,7 @@ const (
 	comfyUIRepoURL        = "https://github.com/comfyanonymous/ComfyUI.git"
 )
 
-// Styles
+// Styles and related variables
 var (
 	docStyle                = lipgloss.NewStyle().Margin(1, 2)
 	titleStyle              = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")) // Light Purple
@@ -116,7 +116,7 @@ func initPaths() error {
 	// Load .env file from CLI directory
 	err = godotenv.Load(appPaths.envFile)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		if (!os.IsNotExist(err)) {
 			fmt.Println(warningStyle.Render(fmt.Sprintf("Warning: Could not load .env file at %s: %v", appPaths.envFile, err)))
 		}
 		// If .env does not exist, it's not an error yet.
@@ -531,7 +531,7 @@ func installComfyUI() {
 	// Handle existing directory for installationPath
 	targetInfo, err := os.Stat(installPath)
 	if err == nil { // Path exists
-		if !targetInfo.IsDir() {
+		if (!targetInfo.IsDir()) {
 			fmt.Println(errorStyle.Render(fmt.Sprintf("Error: The path %s exists but is a file, not a directory. Please choose a different path or remove the file.", installPath)))
 			return
 		}
