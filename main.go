@@ -1006,7 +1006,6 @@ func main() {
 					debounce = d
 				}
 			}
-			// Read includedDirs from .env (COMFY_RELOAD_INCLUDE_DIRS)
 			includedDirs := []string{}
 			if val := os.Getenv("COMFY_RELOAD_INCLUDE_DIRS"); val != "" {
 				for _, d := range strings.Split(val, ",") {
@@ -1032,7 +1031,6 @@ func main() {
 		case "update_nodes", "update-nodes", "update_node", "update-node":
 			updateCustomNodes()
 		case "watch_nodes":
-			// New command: allow user to select which nodes to watch (all others will be excluded)
 			customNodesDir := filepath.Join(appPaths.comfyUIDir, "custom_nodes")
 			entries, err := os.ReadDir(customNodesDir)
 			if err != nil {
@@ -1073,7 +1071,6 @@ func main() {
 				os.Exit(1)
 			}
 			// Compute includedDirs as the selected nodes (opt-in)
-			// (No need to compute excludedDirs anymore)
 			// Save to .env (COMFY_RELOAD_INCLUDE_DIRS)
 			envMap := make(map[string]string)
 			if _, err := os.Stat(appPaths.envFile); err == nil {
@@ -1193,7 +1190,6 @@ func main() {
 	case "status":
 		statusComfyUI()
 	case "watch_nodes":
-		// New command: allow user to select which nodes to watch (all others will be excluded)
 		customNodesDir := filepath.Join(appPaths.comfyUIDir, "custom_nodes")
 		entries, err := os.ReadDir(customNodesDir)
 		if err != nil {
@@ -1233,9 +1229,6 @@ func main() {
 			fmt.Println(errorStyle.Render(fmt.Sprintf("Error running form: %v", err)))
 			os.Exit(1)
 		}
-		// Compute includedDirs as the selected nodes (opt-in)
-		// (No need to compute excludedDirs anymore)
-		// Save to .env (COMFY_RELOAD_INCLUDE_DIRS)
 		envMap := make(map[string]string)
 		if _, err := os.Stat(appPaths.envFile); err == nil {
 			existingEnv, readErr := godotenv.Read(appPaths.envFile)

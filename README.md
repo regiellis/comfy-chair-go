@@ -8,6 +8,8 @@
 </p>
 
 ---
+> [!WARNING]
+> You do not need [Go (Golang)](https://go.dev/) installed to use Comfy Chair. The binary is self-contained and does not require any additional dependencies. You can download the latest release from the releases page and run it directly. You will need to have [UV](https://github.com/astral-sh/uv) installed for the install/update commands to work, but this is not a requirement for running Comfy Chair itself.
 
 > [!IMPORTANT]
 > I am aware of the open discussions, issues, PRs, and other solutions surrounding ComfyUI and Hot Reloading. This project is not intended to replace or compete with any existing tools or workflows. This was previously a collection of bash scripts I used when I developed my own custom nodes, and has now been unified into a single CLI tool. 
@@ -99,6 +101,10 @@ If a `.env` file is not found on first run, Comfy Chair will prompt you to creat
 
 ## 🆕 Recent Improvements & Features
 
+* **Opt-in Node Watching for Reloads:**
+  * Use the new `watch_nodes` command or select "Select Watched Nodes for Reload" from the interactive menu to choose which custom node directories should trigger reloads. Only the selected directories are watched; all others are ignored by default.
+  * Your selection is saved to `.env` as `COMFY_RELOAD_INCLUDE_DIRS` (comma-separated list).
+  * Symlinked directories are supported and will be resolved and watched cross-platform.
 * **Command Aliases:** All commands support both `snake_case` and `kebab-case` (e.g., `create_node` and `create-node`).
 * **--help Flag & Usage:** Use `--help`, `-h`, or `help` to show a detailed usage guide with all commands and aliases.
 * **.env Validation:** On startup, required `.env` variables are checked; missing variables trigger a warning and setup guidance.
@@ -127,6 +133,8 @@ COMFYUI_PATH=/path/to/your/ComfyUI
 COMFY_RELOAD_EXTS=.py,.js,.css
 # Debounce time in seconds for reloads (default: 5)
 COMFY_RELOAD_DEBOUNCE=5
+# Comma-separated list of custom node directories to watch for reloads (opt-in, default: empty)
+COMFY_RELOAD_INCLUDE_DIRS=
 ```
 
 * If `.env` is missing or incomplete, Comfy Chair will prompt you to set it up interactively.
@@ -150,6 +158,7 @@ comfy-chair --help   # Show all commands and aliases
 | restart         |                       | Restart ComfyUI                             |
 | update          |                       | Update ComfyUI                              |
 | reload          |                       | Watch for changes and reload ComfyUI        |
+| watch_nodes     |                       | Select which custom nodes to watch for reload (opt-in) |
 | create_node     | create-node            | Scaffold a new custom node                  |
 | list_nodes      | list-nodes             | List all custom nodes                       |
 | delete_node     | delete-node            | Delete a custom node                        |
