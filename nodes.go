@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -371,4 +372,124 @@ func zipDirectory(srcDir, destZip string) error {
 		_, err = io.Copy(w, file)
 		return err
 	})
+}
+
+// updateCustomNodes updates selected or all custom nodes: git pull and install requirements.txt using uv or pip in the venv.
+func updateCustomNodes() {
+	fmt.Println(titleStyle.Render("Update Custom Node(s)"))
+	if !appPaths.isConfigured {
+		fmt.Println(errorStyle.Render("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' first."))
+		return
+	}
+
+	customNodesDir := filepath.Join(appPaths.comfyUIDir, "custom_nodes")
+	venvPath := appPaths.venvPath
+	if venvPath == "" {
+		venvPath = filepath.Join(appPaths.comfyUIDir, "venv")
+	}
+	venvBin := filepath.Join(venvPath, "bin")
+
+	files, err := os.ReadDir(customNodesDir)
+	if err != nil {
+		fmt.Println(errorStyle.Render(fmt.Sprintf("Failed to read custom nodes directory: %v", err)))
+		return
+	}
+
+	var nodeNames []string
+	for _, file := range files {
+		if file.IsDir() {
+			nodeNames = append(nodeNames, file.Name())
+		}
+	}
+
+	if len(nodeNames) == 0 {
+		fmt.Println(infoStyle.Render("No custom nodes found."))
+		return
+	}
+
+	var selected []string
+	selectPrompt := huh.NewMultiSelect[string]().
+		Title("Select custom nodes to update (space to select, enter to confirm):").
+		Options(append([]huh.Option[string]{huh.NewOption("[ALL]", "[ALL]")}, func() []huh.Option[string] {
+			opts := make([]huh.Option[string], len(nodeNames))
+			for i, name := range nodeNames {
+				opts[i] = huh.NewOption(name, name)
+			}
+			return opts
+		}()...)...).
+		Value(&selected)
+	if err := selectPrompt.Run(); err != nil || len(selected) == 0 {
+		fmt.Println(infoStyle.Render("Node update cancelled."))
+		return
+	}
+
+	if len(selected) == 1 && selected[0] == "[ALL]" {
+		selected = nodeNames
+	}
+
+	for _, node := range selected {
+		nodeDir := filepath.Join(customNodesDir, node)
+		reqFile := filepath.Join(nodeDir, "requirements.txt")
+		if _, err := os.Stat(reqFile); err != nil {
+			fmt.Println(warningStyle.Render(fmt.Sprintf("requirements.txt not found for node '%s', skipping.", node)))
+			continue
+		}
+
+		fmt.Println(titleStyle.Render(fmt.Sprintf("Updating %s", node)))
+
+		// 1. git pull if .git exists
+		if _, err := os.Stat(filepath.Join(nodeDir, ".git")); err == nil {
+			fmt.Println(infoStyle.Render("Running git pull..."))
+			cmdGit := exec.Command("git", "pull")
+			cmdGit.Dir = nodeDir
+			cmdGit.Stdout = os.Stdout
+			cmdGit.Stderr = os.Stderr
+			if err := cmdGit.Run(); err != nil {
+				fmt.Println(warningStyle.Render(fmt.Sprintf("git pull failed in %s: %v", nodeDir, err)))
+			}
+		}
+
+		// 2. Try uv pip install -r requirements.txt
+		uvBinPath := filepath.Join(venvBin, "uv")
+		uvPath := ""
+		if _, err := os.Stat(uvBinPath); err == nil {
+			uvPath = uvBinPath
+		} else if uvSys, err := exec.LookPath("uv"); err == nil {
+			uvPath = uvSys
+		}
+
+		pipPath := filepath.Join(venvBin, "pip")
+		if _, err := os.Stat(pipPath); err != nil {
+			if pipSys, err := exec.LookPath("pip"); err == nil {
+				pipPath = pipSys
+			}
+		}
+
+		var installErr error
+		if uvPath != "" {
+			fmt.Println(infoStyle.Render("Trying uv pip install -r requirements.txt ..."))
+			cmdUv := exec.Command(uvPath, "pip", "install", "-r", reqFile)
+			cmdUv.Dir = nodeDir
+			cmdUv.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+			cmdUv.Stdout = os.Stdout
+			cmdUv.Stderr = os.Stderr
+			installErr = cmdUv.Run()
+			if installErr == nil {
+				fmt.Println(successStyle.Render("uv pip install succeeded."))
+			}
+		}
+		if uvPath == "" || installErr != nil {
+			fmt.Println(infoStyle.Render("Falling back to pip install -r requirements.txt ..."))
+			cmdPip := exec.Command(pipPath, "install", "-r", reqFile)
+			cmdPip.Dir = nodeDir
+			cmdPip.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+			cmdPip.Stdout = os.Stdout
+			cmdPip.Stderr = os.Stderr
+			if err := cmdPip.Run(); err != nil {
+				fmt.Println(warningStyle.Render(fmt.Sprintf("pip install failed in %s: %v", nodeDir, err)))
+			} else {
+				fmt.Println(successStyle.Render("pip install succeeded."))
+			}
+		}
+	}
 }

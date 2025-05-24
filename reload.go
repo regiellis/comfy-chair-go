@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 func reloadComfyUI(watchDir string, debounceSeconds int, exts []string) {
@@ -29,6 +32,12 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string) {
 			return
 		}
 		defer file.Close()
+		// Seek to the end of the file initially to only show new logs
+		_, err = file.Seek(0, io.SeekEnd)
+		if err != nil {
+			fmt.Println(errorStyle.Render(fmt.Sprintf("Failed to seek to end of log file: %v", err)))
+			return
+		}
 		reader := bufio.NewReader(file)
 		for {
 			select {
@@ -56,79 +65,120 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string) {
 		time.Sleep(2 * time.Second)
 	}
 
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(errorStyle.Render(fmt.Sprintf("Failed to create watcher: %v", err)))
+	}
+	defer watcher.Close()
+
+	// Add all subdirectories to the watcher
+	err = filepath.Walk(watchDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Println(warningStyle.Render(fmt.Sprintf("Error accessing path %s: %v", path, err)))
+			return err
+		}
+		if info.IsDir() {
+			err = watcher.Add(path)
+			if err != nil {
+				fmt.Println(warningStyle.Render(fmt.Sprintf("Failed to watch directory %s: %v", path, err)))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatal(errorStyle.Render(fmt.Sprintf("Error walking the path %q: %v\n", watchDir, err)))
+	}
+
 	fmt.Println(successStyle.Render(fmt.Sprintf("Watching %s for changes...", watchDir)))
-	lastRestart := time.Now().Add(-time.Duration(debounceSeconds) * time.Second)
+	lastRestartTime := time.Now()
+	debounceDuration := time.Duration(debounceSeconds) * time.Second
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
 	go func() {
 		<-sigs
 		fmt.Println("\nReceived signal, exiting reload watcher...")
 		close(tailDone)
+		watcher.Close()
 		os.Exit(0)
 	}()
 
 	for {
-		var latestMod time.Time
-		var changedFile string
-		filepath.Walk(watchDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
-				return nil
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
 			}
-			for _, ext := range exts {
-				if strings.HasSuffix(path, ext) {
-					if info.ModTime().After(latestMod) {
-						latestMod = info.ModTime()
-						changedFile = path
-					}
-				}
-			}
-			return nil
-		})
-		if !latestMod.IsZero() && latestMod.After(lastRestart) && time.Since(latestMod) > 0 {
-			fmt.Println(warningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", changedFile)))
-			pid, isRunning := getRunningPID()
-			if isRunning {
-				process, err := os.FindProcess(pid)
-				if err == nil {
-					// Try graceful stop first (SIGTERM)
-					process.Signal(syscall.SIGTERM)
-					waited := 0
-					for waited < 20 {
-						time.Sleep(100 * time.Millisecond)
-						if !isProcessRunning(pid) {
-							break
-						}
-						waited++
-					}
-					if isProcessRunning(pid) {
-						if isWindows() {
-							process.Kill()
-						} else {
-							process.Signal(syscall.SIGKILL)
-						}
-						fmt.Println(warningStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) force killed for reload.", pid)))
-						for i := 0; i < 10; i++ {
-							time.Sleep(100 * time.Millisecond)
-							if !isProcessRunning(pid) {
-								break
-							}
-						}
-					} else {
-						fmt.Println(infoStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) stopped gracefully.", pid)))
-					}
+			// Check if the event is a write or create and matches one of the specified extensions
+			if (event.Op.Has(fsnotify.Write) || event.Op.Has(fsnotify.Create)) && matchesExtension(event.Name, exts) {
+				if time.Since(lastRestartTime) > debounceDuration {
+					fmt.Println(warningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", event.Name)))
+					restartComfyUIProcess()
+					lastRestartTime = time.Now()
 				} else {
-					fmt.Println(warningStyle.Render(fmt.Sprintf("Could not find process to kill (PID: %d): %v", pid, err)))
+					fmt.Println(infoStyle.Render(fmt.Sprintf("Change detected in %s, but debouncing...", event.Name)))
 				}
-				cleanupPIDFile()
-			} else if pid != 0 {
-				cleanupPIDFile()
 			}
-			startComfyUI(true)
-			lastRestart = time.Now()
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Println(errorStyle.Render(fmt.Sprintf("Watcher error: %v", err)))
 		}
-		time.Sleep(1 * time.Second)
 	}
+}
+
+func matchesExtension(filePath string, exts []string) bool {
+	for _, ext := range exts {
+		if strings.HasSuffix(strings.ToLower(filePath), strings.ToLower(ext)) {
+			return true
+		}
+	}
+	return false
+}
+
+func restartComfyUIProcess() {
+	pid, isRunning := getRunningPID()
+	if isRunning {
+		process, err := os.FindProcess(pid)
+		if err == nil {
+			// Try graceful stop first (SIGTERM)
+			process.Signal(syscall.SIGTERM)
+			waited := 0
+			for waited < 20 { // Wait up to 2 seconds (20 * 100ms)
+				time.Sleep(100 * time.Millisecond)
+				if !isProcessRunning(pid) {
+					break
+				}
+				waited++
+			}
+			if isProcessRunning(pid) {
+				if isWindows() {
+					process.Kill()
+				} else {
+					process.Signal(syscall.SIGKILL)
+				}
+				fmt.Println(warningStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) force killed for reload.", pid)))
+				// Short delay to ensure process is fully terminated
+				for i := 0; i < 10; i++ {
+					time.Sleep(100 * time.Millisecond)
+					if !isProcessRunning(pid) {
+						break
+					}
+				}
+			} else {
+				fmt.Println(infoStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) stopped gracefully.", pid)))
+			}
+		} else {
+			fmt.Println(warningStyle.Render(fmt.Sprintf("Could not find process to kill (PID: %d): %v", pid, err)))
+		}
+		cleanupPIDFile()
+	} else if pid != 0 { // Stale PID file
+		fmt.Println(infoStyle.Render(fmt.Sprintf("Removing stale PID file for PID %d.", pid)))
+		cleanupPIDFile()
+	}
+	startComfyUI(true)
 }
 
 func isWindows() bool {

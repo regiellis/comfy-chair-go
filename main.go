@@ -664,11 +664,8 @@ func executeCommand(commandName string, args []string, workDir string, logFilePa
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 
-		// Only set SysProcAttr.Setsid on Unix (not Windows)
-		// This avoids build errors on Windows where Setsid is not available.
-		if runtime.GOOS != "windows" {
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		}
+		// Call the platform-specific function to configure SysProcAttr
+		configureCmdSysProcAttr(cmd)
 
 		err = cmd.Start()
 		if err != nil {
@@ -958,7 +955,7 @@ func printUsage() {
 	fmt.Println(titleStyle.Render("Comfy Chair CLI Usage"))
 	fmt.Println("Usage: comfy-chair [command]")
 	fmt.Println("Commands:")
-	fmt.Println("  start, start_fg, start-fg         Start ComfyUI in foreground")
+	fmt.Println("  start, start_fg, start-fg          Start ComfyUI in foreground")
 	fmt.Println("  background, start_bg, start-bg     Start ComfyUI in background")
 	fmt.Println("  stop                               Stop ComfyUI")
 	fmt.Println("  restart                            Restart ComfyUI")
@@ -970,6 +967,7 @@ func printUsage() {
 	fmt.Println("  pack_node, pack-node               Pack a custom node into a zip file")
 	fmt.Println("  install                            Install or reconfigure ComfyUI")
 	fmt.Println("  status                             Show ComfyUI status and environment")
+	fmt.Println("  update_nodes, update-nodes         Update selected or all custom nodes using uv")
 	fmt.Println("  help, --help, -h                   Show this help message")
 }
 
@@ -1020,6 +1018,8 @@ func main() {
 			installComfyUI()
 		case "status":
 			statusComfyUI()
+		case "update_nodes", "update-nodes", "update_node", "update-node":
+			updateCustomNodes()
 		case "help", "--help", "-h":
 			printUsage()
 			os.Exit(0)
