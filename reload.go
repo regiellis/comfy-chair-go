@@ -16,7 +16,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-func reloadComfyUI(watchDir string, debounceSeconds int, exts []string) {
+func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, includedDirs []string) {
 	logFile := appPaths.logFile
 	if logFile == "" {
 		fmt.Println(errorStyle.Render("Log file path is not set."))
@@ -71,22 +71,34 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string) {
 	}
 	defer watcher.Close()
 
-	// Add all subdirectories to the watcher
-	err = filepath.Walk(watchDir, func(path string, info os.FileInfo, err error) error {
+	// Add only includedDirs to the watcher (opt-in)
+	for _, dir := range includedDirs {
+		watchPath := filepath.Join(watchDir, dir)
+		info, err := os.Lstat(watchPath)
 		if err != nil {
-			fmt.Println(warningStyle.Render(fmt.Sprintf("Error accessing path %s: %v", path, err)))
-			return err
+			continue
 		}
-		if info.IsDir() {
-			err = watcher.Add(path)
+		// If it's a symlink, resolve it and ensure it's a directory
+		if info.Mode()&os.ModeSymlink != 0 {
+			realPath, err := filepath.EvalSymlinks(watchPath)
 			if err != nil {
-				fmt.Println(warningStyle.Render(fmt.Sprintf("Failed to watch directory %s: %v", path, err)))
+				fmt.Println(warningStyle.Render(fmt.Sprintf("Failed to resolve symlink %s: %v", watchPath, err)))
+				continue
 			}
+			info, err = os.Stat(realPath)
+			if err != nil || !info.IsDir() {
+				fmt.Println(warningStyle.Render(fmt.Sprintf("Symlink %s does not resolve to a directory.", watchPath)))
+				continue
+			}
+			watchPath = realPath
 		}
-		return nil
-	})
-	if err != nil {
-		log.Fatal(errorStyle.Render(fmt.Sprintf("Error walking the path %q: %v\n", watchDir, err)))
+		if !info.IsDir() {
+			continue
+		}
+		err = watcher.Add(watchPath)
+		if err != nil {
+			fmt.Println(warningStyle.Render(fmt.Sprintf("Failed to watch directory %s: %v", watchPath, err)))
+		}
 	}
 
 	fmt.Println(successStyle.Render(fmt.Sprintf("Watching %s for changes...", watchDir)))
@@ -110,7 +122,17 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string) {
 			if !ok {
 				return
 			}
-			// Check if the event is a write or create and matches one of the specified extensions
+			// Only trigger reload if the event is in an includedDir
+			inIncluded := false
+			for _, dir := range includedDirs {
+				if strings.Contains(filepath.ToSlash(event.Name), "/"+dir+"/") || strings.HasPrefix(filepath.ToSlash(event.Name), filepath.ToSlash(filepath.Join(watchDir, dir))) {
+					inIncluded = true
+					break
+				}
+			}
+			if !inIncluded {
+				continue
+			}
 			if (event.Op.Has(fsnotify.Write) || event.Op.Has(fsnotify.Create)) && matchesExtension(event.Name, exts) {
 				if time.Since(lastRestartTime) > debounceDuration {
 					fmt.Println(warningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", event.Name)))

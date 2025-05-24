@@ -955,19 +955,20 @@ func printUsage() {
 	fmt.Println(titleStyle.Render("Comfy Chair CLI Usage"))
 	fmt.Println("Usage: comfy-chair [command]")
 	fmt.Println("Commands:")
-	fmt.Println("  start, start_fg, start-fg          Start ComfyUI in foreground")
-	fmt.Println("  background, start_bg, start-bg     Start ComfyUI in background")
+	fmt.Println("  start, start-fg                	  Start ComfyUI in foreground")
+	fmt.Println("  background, start-bg     		  Start ComfyUI in background")
 	fmt.Println("  stop                               Stop ComfyUI")
 	fmt.Println("  restart                            Restart ComfyUI")
 	fmt.Println("  update                             Update ComfyUI")
 	fmt.Println("  reload                             Watch for changes and reload ComfyUI")
-	fmt.Println("  create_node, create-node           Scaffold a new custom node")
-	fmt.Println("  list_nodes, list-nodes             List all custom nodes")
-	fmt.Println("  delete_node, delete-node           Delete a custom node")
-	fmt.Println("  pack_node, pack-node               Pack a custom node into a zip file")
+	fmt.Println("  create-node            			  Scaffold a new custom node")
+	fmt.Println("  list-nodes             			  List all custom nodes")
+	fmt.Println("  delete-node           			  Delete a custom node")
+	fmt.Println("  pack-node               			  Pack a custom node into a zip file")
 	fmt.Println("  install                            Install or reconfigure ComfyUI")
 	fmt.Println("  status                             Show ComfyUI status and environment")
-	fmt.Println("  update_nodes, update-nodes         Update selected or all custom nodes using uv")
+	fmt.Println("  update-nodes         			  Update selected or all custom nodes using uv")
+	fmt.Println("  watch_nodes                        Custom nodes to watch (all others excluded)")
 	fmt.Println("  help, --help, -h                   Show this help message")
 }
 
@@ -1005,7 +1006,17 @@ func main() {
 					debounce = d
 				}
 			}
-			reloadComfyUI(watchDir, debounce, exts)
+			// Read includedDirs from .env (COMFY_RELOAD_INCLUDE_DIRS)
+			includedDirs := []string{}
+			if val := os.Getenv("COMFY_RELOAD_INCLUDE_DIRS"); val != "" {
+				for _, d := range strings.Split(val, ",") {
+					trimmed := strings.TrimSpace(d)
+					if trimmed != "" {
+						includedDirs = append(includedDirs, trimmed)
+					}
+				}
+			}
+			reloadComfyUI(watchDir, debounce, exts, includedDirs)
 		case "create_node", "create-node":
 			createNewNode()
 		case "list_nodes", "list-nodes":
@@ -1020,6 +1031,66 @@ func main() {
 			statusComfyUI()
 		case "update_nodes", "update-nodes", "update_node", "update-node":
 			updateCustomNodes()
+		case "watch_nodes":
+			// New command: allow user to select which nodes to watch (all others will be excluded)
+			customNodesDir := filepath.Join(appPaths.comfyUIDir, "custom_nodes")
+			entries, err := os.ReadDir(customNodesDir)
+			if err != nil {
+				fmt.Println(errorStyle.Render(fmt.Sprintf("Failed to read custom_nodes directory: %v", err)))
+				os.Exit(1)
+			}
+			var nodeDirs []string
+			for _, entry := range entries {
+				if entry.IsDir() {
+					nodeDirs = append(nodeDirs, entry.Name())
+				}
+			}
+			if len(nodeDirs) == 0 {
+				fmt.Println(warningStyle.Render("No custom node directories found to watch."))
+				os.Exit(0)
+			}
+			var selected []string
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewMultiSelect[string]().
+						Title("Select custom nodes to actively watch for reload (all others will be excluded):").
+						OptionsFunc(func() []huh.Option[string] {
+							opts := make([]huh.Option[string], 0, len(nodeDirs))
+							for _, d := range nodeDirs {
+								opts = append(opts, huh.NewOption(d, d))
+							}
+							return opts
+						}, nil).
+						Value(&selected),
+				),
+			).WithTheme(huh.ThemeCharm())
+			if err := form.Run(); err != nil {
+				if errors.Is(err, huh.ErrUserAborted) {
+					fmt.Println(infoStyle.Render("Operation cancelled by user."))
+					os.Exit(0)
+				}
+				fmt.Println(errorStyle.Render(fmt.Sprintf("Error running form: %v", err)))
+				os.Exit(1)
+			}
+			// Compute includedDirs as the selected nodes (opt-in)
+			// (No need to compute excludedDirs anymore)
+			// Save to .env (COMFY_RELOAD_INCLUDE_DIRS)
+			envMap := make(map[string]string)
+			if _, err := os.Stat(appPaths.envFile); err == nil {
+				existingEnv, readErr := godotenv.Read(appPaths.envFile)
+				if readErr == nil {
+					for k, v := range existingEnv {
+						envMap[k] = v
+					}
+				}
+			}
+			envMap["COMFY_RELOAD_INCLUDE_DIRS"] = strings.Join(selected, ",")
+			if err := godotenv.Write(envMap, appPaths.envFile); err != nil {
+				fmt.Println(errorStyle.Render(fmt.Sprintf("Failed to update .env: %v", err)))
+				os.Exit(1)
+			}
+			fmt.Println(successStyle.Render(fmt.Sprintf("Updated .env: COMFY_RELOAD_INCLUDE_DIRS=%s", strings.Join(selected, ","))))
+			os.Exit(0)
 		case "help", "--help", "-h":
 			printUsage()
 			os.Exit(0)
@@ -1038,17 +1109,19 @@ func main() {
 				Title(titleStyle.Render("ComfyUI Manager")).
 				Description("Select an action:").
 				Options(
-					huh.NewOption("Start ComfyUI (Foreground)", "start_fg"),
-					huh.NewOption("Start ComfyUI (Background)", "start_bg"),
+					huh.NewOption("Start ComfyUI (Foreground)", "start"),
+					huh.NewOption("Start ComfyUI (Background)", "background"),
 					huh.NewOption("Stop ComfyUI", "stop"),
 					huh.NewOption("Restart ComfyUI (Background)", "restart"),
 					huh.NewOption("Update ComfyUI", "update"),
 					huh.NewOption("Install/Reconfigure ComfyUI", "install"),
-					huh.NewOption("Create New Node", "create_node"),
-					huh.NewOption("List Custom Nodes", "list_nodes"),
-					huh.NewOption("Delete Custom Node", "delete_node"),
-					huh.NewOption("Pack Custom Node", "pack_node"),
+					huh.NewOption("Create New Node", "create-node"),
+					huh.NewOption("List Custom Nodes", "list-nodes"),
+					huh.NewOption("Delete Custom Node", "delete-node"),
+					huh.NewOption("Pack Custom Node", "pack-node"),
 					huh.NewOption("Reload ComfyUI on Node Changes", "reload"),
+					huh.NewOption("Update Custom Nodes", "update-nodes"),
+					huh.NewOption("Select Watched Nodes for Reload", "watch_nodes"),
 					huh.NewOption("Status (ComfyUI)", "status"),
 					huh.NewOption("Exit", "exit"),
 				).
@@ -1106,9 +1179,79 @@ func main() {
 				debounce = d
 			}
 		}
-		reloadComfyUI(watchDir, debounce, exts)
+		// Read includedDirs from .env (COMFY_RELOAD_INCLUDE_DIRS)
+		includedDirs := []string{}
+		if val := os.Getenv("COMFY_RELOAD_INCLUDE_DIRS"); val != "" {
+			for _, d := range strings.Split(val, ",") {
+				trimmed := strings.TrimSpace(d)
+				if trimmed != "" {
+					includedDirs = append(includedDirs, trimmed)
+				}
+			}
+		}
+		reloadComfyUI(watchDir, debounce, exts, includedDirs)
 	case "status":
 		statusComfyUI()
+	case "watch_nodes":
+		// New command: allow user to select which nodes to watch (all others will be excluded)
+		customNodesDir := filepath.Join(appPaths.comfyUIDir, "custom_nodes")
+		entries, err := os.ReadDir(customNodesDir)
+		if err != nil {
+			fmt.Println(errorStyle.Render(fmt.Sprintf("Failed to read custom_nodes directory: %v", err)))
+			os.Exit(1)
+		}
+		var nodeDirs []string
+		for _, entry := range entries {
+			if entry.IsDir() {
+				nodeDirs = append(nodeDirs, entry.Name())
+			}
+		}
+		if len(nodeDirs) == 0 {
+			fmt.Println(warningStyle.Render("No custom node directories found to watch."))
+			os.Exit(0)
+		}
+		var selected []string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewMultiSelect[string]().
+					Title("Select custom nodes to actively watch for reload (all others will be excluded):").
+					OptionsFunc(func() []huh.Option[string] {
+						opts := make([]huh.Option[string], 0, len(nodeDirs))
+						for _, d := range nodeDirs {
+							opts = append(opts, huh.NewOption(d, d))
+						}
+						return opts
+					}, nil).
+					Value(&selected),
+			),
+		).WithTheme(huh.ThemeCharm())
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println(infoStyle.Render("Operation cancelled by user."))
+				os.Exit(0)
+			}
+			fmt.Println(errorStyle.Render(fmt.Sprintf("Error running form: %v", err)))
+			os.Exit(1)
+		}
+		// Compute includedDirs as the selected nodes (opt-in)
+		// (No need to compute excludedDirs anymore)
+		// Save to .env (COMFY_RELOAD_INCLUDE_DIRS)
+		envMap := make(map[string]string)
+		if _, err := os.Stat(appPaths.envFile); err == nil {
+			existingEnv, readErr := godotenv.Read(appPaths.envFile)
+			if readErr == nil {
+				for k, v := range existingEnv {
+					envMap[k] = v
+				}
+			}
+		}
+		envMap["COMFY_RELOAD_INCLUDE_DIRS"] = strings.Join(selected, ",")
+		if err := godotenv.Write(envMap, appPaths.envFile); err != nil {
+			fmt.Println(errorStyle.Render(fmt.Sprintf("Failed to update .env: %v", err)))
+			os.Exit(1)
+		}
+		fmt.Println(successStyle.Render(fmt.Sprintf("Updated .env: COMFY_RELOAD_INCLUDE_DIRS=%s", strings.Join(selected, ","))))
+		os.Exit(0)
 	case "exit":
 		fmt.Println(infoStyle.Render("Exiting."))
 		os.Exit(0)
