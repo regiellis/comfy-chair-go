@@ -9,12 +9,18 @@
 
 ---
 
-> [!NOTE]
+> [!IMPORTANT]
 > I am aware of the open discussions, issues, PRs, and other solutions surrounding ComfyUI and Hot Reloading. This project is not intended to replace or compete with any existing tools or workflows. This was previously a collection of bash scripts I used when I developed my own custom nodes, and has now been unified into a single CLI tool. 
 >
 > **This workflow is **opinionated** and may not suit everyone;** it was created to suit my own needs. I am open to suggestions and improvements, but please understand that this is a personal project and I offer it as an alternative method to developing on ComfyUI.
 >
 > If you find it useful, great! It may not be for everyone, and that's perfectly fine. Use it at your own risk and feel free to fork it if you want to make changes or issue PRs.
+
+> [!NOTE]
+>  For reference, here is my original discussion regrading the ComfyUI hot reloading issue: [#1](https://github.com/comfyanonymous/ComfyUI/discussions/5290)
+> For a more in-depth discussion of the topic, see [#2](https://github.com/comfyanonymous/ComfyUI/pull/749) and [#3](https://github.com/comfyanonymous/ComfyUI/pull/796)
+> Other projects that may be of interest: [ComfyUI-HotReloadHack](https://github.com/logtd/ComfyUI-HotReloadHack), [ComfyUI-LG_HotReload](https://github.com/LAOGOU-666/ComfyUI-LG_HotReload)
+> 
 
 
 

@@ -33,7 +33,7 @@ jobs:
           mkdir -p dist
           EXT=""
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          go build -o dist/comfy-chair-${{ matrix.goos }}-${{ matrix.goarch }}$EXT .
+          go build -o dist/comfy-chair-${{ matrix.goos }}-${{ matrix.goarch }}$EXT main.go nodes.go reload.go styles.go procattr_unix.go procattr_windows.go
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4

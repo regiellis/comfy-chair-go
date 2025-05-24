@@ -4,7 +4,7 @@ tasks:
   build:
     desc: Build the comfy-chair binary for your OS/arch
     cmds:
-      - go build -o comfy-chair main.go nodes.go reload.go
+      - go build -o comfy-chair main.go nodes.go reload.go styles.go procattr_unix.go procattr_windows.go
     sources:
       - '**/*.go'
     generates:
@@ -26,15 +26,15 @@ tasks:
     cmds:
       - ./comfy-chair
 
-      build-all:
-        desc: Build comfy-chair for multiple OS/arch targets
-        cmds:
-          - GOOS=linux   GOARCH=amd64 go build -o dist/comfy-chair-linux-amd64   main.go nodes.go reload.go
-          - GOOS=darwin  GOARCH=amd64 go build -o dist/comfy-chair-darwin-amd64  main.go nodes.go reload.go
-          - GOOS=windows GOARCH=amd64 go build -o dist/comfy-chair-windows-amd64.exe main.go nodes.go reload.go
-        sources:
-          - '**/*.go'
-        generates:
-          - dist/comfy-chair-linux-amd64
-          - dist/comfy-chair-darwin-amd64
-          - dist/comfy-chair-windows-amd64.exe
+  build-all:
+    desc: Build comfy-chair for multiple OS/arch targets
+    cmds:
+      - GOOS=linux   GOARCH=amd64 go build -o dist/comfy-chair-linux-amd64   main.go nodes.go reload.go styles.go procattr_unix.go procattr_windows.go
+      - GOOS=darwin  GOARCH=amd64 go build -o dist/comfy-chair-darwin-amd64  main.go nodes.go reload.go styles.go procattr_unix.go procattr_windows.go
+      - GOOS=windows GOARCH=amd64 go build -o dist/comfy-chair-windows-amd64.exe main.go nodes.go reload.go styles.go procattr_unix.go procattr_windows.go
+    sources:
+      - '**/*.go'
+    generates:
+      - dist/comfy-chair-linux-amd64
+      - dist/comfy-chair-darwin-amd64
+      - dist/comfy-chair-windows-amd64.exe
