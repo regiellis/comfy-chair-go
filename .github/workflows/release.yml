@@ -9,13 +9,6 @@ jobs:
   build:
     name: Build binaries
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, windows, darwin]
-        goarch: [amd64, arm64]
-        exclude:
-          - goos: windows
-            goarch: arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,20 +18,17 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Build binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+      - name: Build all binaries (cross-platform)
         run: |
           mkdir -p dist
-          EXT=""
-          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          go build -o dist/comfy-chair-${{ matrix.goos }}-${{ matrix.goarch }}$EXT main.go nodes.go reload.go styles.go procattr_unix.go procattr_windows.go
+          GOOS=linux   GOARCH=amd64 go build -o dist/comfy-chair-linux-amd64   .
+          GOOS=darwin  GOARCH=amd64 go build -o dist/comfy-chair-darwin-amd64  .
+          GOOS=windows GOARCH=amd64 go build -o dist/comfy-chair-windows-amd64.exe .
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: binaries
           path: dist/*
 
   release:
