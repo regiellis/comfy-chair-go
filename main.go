@@ -1106,16 +1106,16 @@ func main() {
 				Title(titleStyle.Render("ComfyUI Manager")).
 				Description("Select an action:").
 				Options(
-					huh.NewOption("Start ComfyUI (Foreground)", "start"),
-					huh.NewOption("Start ComfyUI (Background)", "background"),
+					huh.NewOption("Start ComfyUI (Foreground)", "start_fg"),
+					huh.NewOption("Start ComfyUI (Background)", "start_bg"),
 					huh.NewOption("Stop ComfyUI", "stop"),
 					huh.NewOption("Restart ComfyUI (Background)", "restart"),
 					huh.NewOption("Update ComfyUI", "update"),
 					huh.NewOption("Install/Reconfigure ComfyUI", "install"),
-					huh.NewOption("Create New Node", "create-node"),
-					huh.NewOption("List Custom Nodes", "list-nodes"),
-					huh.NewOption("Delete Custom Node", "delete-node"),
-					huh.NewOption("Pack Custom Node", "pack-node"),
+					huh.NewOption("Create New Node", "create_node"),
+					huh.NewOption("List Custom Nodes", "list_nodes"),
+					huh.NewOption("Delete Custom Node", "delete_node"),
+					huh.NewOption("Pack Custom Node", "pack_node"),
 					huh.NewOption("Reload ComfyUI on Node Changes", "reload"),
 					huh.NewOption("Update Custom Nodes", "update-nodes"),
 					huh.NewOption("Select Watched Nodes for Reload", "watch_nodes"),
@@ -1245,6 +1245,8 @@ func main() {
 		}
 		fmt.Println(successStyle.Render(fmt.Sprintf("Updated .env: COMFY_RELOAD_INCLUDE_DIRS=%s", strings.Join(selected, ","))))
 		os.Exit(0)
+	case "update-nodes":
+		updateCustomNodes()
 	case "exit":
 		fmt.Println(infoStyle.Render("Exiting."))
 		os.Exit(0)
