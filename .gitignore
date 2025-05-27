@@ -23,6 +23,7 @@ go.work.sum
 
 # IDE/editor files
 .vscode/
+.task
 .idea/
 *.swp
 
