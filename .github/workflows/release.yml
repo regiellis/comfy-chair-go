@@ -21,9 +21,9 @@ jobs:
       - name: Build all binaries (cross-platform)
         run: |
           mkdir -p dist
-          GOOS=linux   GOARCH=amd64 go build -o dist/comfy-chair-linux-amd64   .
-          GOOS=darwin  GOARCH=amd64 go build -o dist/comfy-chair-darwin-amd64  .
-          GOOS=windows GOARCH=amd64 go build -o dist/comfy-chair-windows-amd64.exe .
+          GOOS=linux   GOARCH=amd64 go build -o dist/comfy-chair-linux-amd64   main.go nodes.go reload.go styles.go procattr_unix.go procattr_windows.go internal/install.go internal/utils.go
+          GOOS=darwin  GOARCH=amd64 go build -o dist/comfy-chair-darwin-amd64  main.go nodes.go reload.go styles.go procattr_unix.go procattr_windows.go internal/install.go internal/utils.go
+          GOOS=windows GOARCH=amd64 go build -o dist/comfy-chair-windows-amd64.exe main.go nodes.go reload.go styles.go procattr_unix.go procattr_windows.go internal/install.go internal/utils.go
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4

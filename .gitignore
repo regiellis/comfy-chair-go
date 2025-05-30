@@ -38,3 +38,5 @@ Thumbs.db
 
 # Logs
 comfyui.log
+comfyui.pid
+comfy-installs.json

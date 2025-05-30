@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/regiellis/comfyui-chair-go/internal"
 )
 
 func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, includedDirs []string) {
-	logFile := appPaths.logFile
+	logFile := appPaths.LogFile
 	if logFile == "" {
-		fmt.Println(errorStyle.Render("Log file path is not set."))
+		fmt.Println(internal.ErrorStyle.Render("Log file path is not set."))
 		return
 	}
 
@@ -28,14 +29,14 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 	go func() {
 		file, err := os.Open(logFile)
 		if err != nil {
-			fmt.Println(errorStyle.Render(fmt.Sprintf("Failed to open log file: %v", err)))
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to open log file: %v", err)))
 			return
 		}
 		defer file.Close()
 		// Seek to the end of the file initially to only show new logs
 		_, err = file.Seek(0, io.SeekEnd)
 		if err != nil {
-			fmt.Println(errorStyle.Render(fmt.Sprintf("Failed to seek to end of log file: %v", err)))
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to seek to end of log file: %v", err)))
 			return
 		}
 		reader := bufio.NewReader(file)
@@ -59,7 +60,7 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 
 	pid, _ := readPID()
 	if !isProcessRunning(pid) {
-		fmt.Println(successStyle.Render("Starting ComfyUI..."))
+		fmt.Println(internal.SuccessStyle.Render("Starting ComfyUI..."))
 		startComfyUI(true)
 		// Give it a moment to start
 		time.Sleep(2 * time.Second)
@@ -67,7 +68,7 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Fatal(errorStyle.Render(fmt.Sprintf("Failed to create watcher: %v", err)))
+		log.Fatal(internal.ErrorStyle.Render(fmt.Sprintf("Failed to create watcher: %v", err)))
 	}
 	defer watcher.Close()
 
@@ -82,12 +83,12 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 		if info.Mode()&os.ModeSymlink != 0 {
 			realPath, err := filepath.EvalSymlinks(watchPath)
 			if err != nil {
-				fmt.Println(warningStyle.Render(fmt.Sprintf("Failed to resolve symlink %s: %v", watchPath, err)))
+				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to resolve symlink %s: %v", watchPath, err)))
 				continue
 			}
 			info, err = os.Stat(realPath)
 			if err != nil || !info.IsDir() {
-				fmt.Println(warningStyle.Render(fmt.Sprintf("Symlink %s does not resolve to a directory.", watchPath)))
+				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Symlink %s does not resolve to a directory.", watchPath)))
 				continue
 			}
 			watchPath = realPath
@@ -97,11 +98,11 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 		}
 		err = watcher.Add(watchPath)
 		if err != nil {
-			fmt.Println(warningStyle.Render(fmt.Sprintf("Failed to watch directory %s: %v", watchPath, err)))
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to watch directory %s: %v", watchPath, err)))
 		}
 	}
 
-	fmt.Println(successStyle.Render(fmt.Sprintf("Watching %s for changes...", watchDir)))
+	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Watching %s for changes...", watchDir)))
 	lastRestartTime := time.Now()
 	debounceDuration := time.Duration(debounceSeconds) * time.Second
 
@@ -135,18 +136,18 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 			}
 			if (event.Op.Has(fsnotify.Write) || event.Op.Has(fsnotify.Create)) && matchesExtension(event.Name, exts) {
 				if time.Since(lastRestartTime) > debounceDuration {
-					fmt.Println(warningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", event.Name)))
+					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", event.Name)))
 					restartComfyUIProcess()
 					lastRestartTime = time.Now()
 				} else {
-					fmt.Println(infoStyle.Render(fmt.Sprintf("Change detected in %s, but debouncing...", event.Name)))
+					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Change detected in %s, but debouncing...", event.Name)))
 				}
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
 			}
-			log.Println(errorStyle.Render(fmt.Sprintf("Watcher error: %v", err)))
+			log.Println(internal.ErrorStyle.Render(fmt.Sprintf("Watcher error: %v", err)))
 		}
 	}
 }
@@ -181,7 +182,7 @@ func restartComfyUIProcess() {
 				} else {
 					process.Signal(syscall.SIGKILL)
 				}
-				fmt.Println(warningStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) force killed for reload.", pid)))
+				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) force killed for reload.", pid)))
 				// Short delay to ensure process is fully terminated
 				for i := 0; i < 10; i++ {
 					time.Sleep(100 * time.Millisecond)
@@ -190,14 +191,14 @@ func restartComfyUIProcess() {
 					}
 				}
 			} else {
-				fmt.Println(infoStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) stopped gracefully.", pid)))
+				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) stopped gracefully.", pid)))
 			}
 		} else {
-			fmt.Println(warningStyle.Render(fmt.Sprintf("Could not find process to kill (PID: %d): %v", pid, err)))
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Could not find process to kill (PID: %d): %v", pid, err)))
 		}
 		cleanupPIDFile()
 	} else if pid != 0 { // Stale PID file
-		fmt.Println(infoStyle.Render(fmt.Sprintf("Removing stale PID file for PID %d.", pid)))
+		fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Removing stale PID file for PID %d.", pid)))
 		cleanupPIDFile()
 	}
 	startComfyUI(true)
