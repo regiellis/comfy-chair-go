@@ -37,8 +37,8 @@
 - 🛡️ **Port Conflict Detection:** Automatically checks if the default ComfyUI port (8188) is in use before starting. If the port is unavailable, you'll be prompted to use the next available port, ensuring smooth cross-platform operation.
 - 🏠 **Portable Path Support:** All config and environment paths now support portable placeholders like `{HOME}` and `{USERPROFILE}` for robust cross-platform compatibility.
 
-
 ### Install in Realtime
+
 ![Install Demo](demos/demo-install.gif)
 
 ## 🚀 Quick Start
@@ -159,9 +159,31 @@ COMFY_RELOAD_EXTS=.py,.js,.css
 COMFY_RELOAD_DEBOUNCE=5
 # Comma-separated list of custom node directories to watch for reloads (opt-in, default: empty)
 COMFY_RELOAD_INCLUDE_DIRS=
+# GPU type for torch install: nvidia, amd, intel, apple, directml, ascend, cambricon, cpu
+GPU_TYPE=nvidia
+# Python version to use for venv (default: 3.12, 3.13 supported but not all nodes work)
+PYTHON_VERSION=3.12
 ```
 
 - If `.env` is missing or incomplete, Comfy Chair will prompt you to set it up interactively.
+
+---
+
+### GPU-Specific PyTorch Installation
+
+Comfy Chair will prompt you for your GPU type and Python version during install. It will automatically install the correct PyTorch/torchvision/torchaudio packages in your venv for:
+
+- **Nvidia (CUDA)**: Stable and nightly supported
+- **AMD (ROCm, Linux only)**: Stable and nightly supported
+- **Intel (Arc/XPU)**: Nightly supported
+- **Apple Silicon (Metal)**: Manual install required (see [Apple Developer Guide](https://developer.apple.com/metal/pytorch/))
+- **DirectML (AMD/Windows)**: torch-directml
+- **Ascend NPU / Cambricon MLU**: Manual install required (see vendor docs)
+- **CPU Only**: Installs CPU-only torch
+
+If your GPU type requires manual steps, Comfy Chair will print instructions. You can always re-run the install or update commands to retry or change your GPU type.
+
+> **Note:** Python 3.12 is recommended. Python 3.13 is supported, but some custom nodes may not work yet.
 
 ---
 
@@ -219,3 +241,13 @@ Contributions are welcome! Please fork, branch, and submit a PR. Ensure your cod
 This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
 
 ---
+
+## 🆕 New Features (May 2025)
+
+- **GPU Selection & PyTorch Install:** During install, Comfy Chair prompts for your GPU type (Nvidia, AMD, Intel, Apple, DirectML, Ascend, Cambricon, or CPU) and automatically installs the correct torch/torchvision/torchaudio packages in your venv. Manual instructions are shown for Apple, Ascend, and Cambricon.
+- **Python Version Prompt:** You can select the Python version for your venv (3.12 recommended, 3.13 supported but not all nodes work). This is stored in `.env` as `PYTHON_VERSION`.
+- **.env Variables:** `.env` and `.env.example` now include `GPU_TYPE` and `PYTHON_VERSION` for reproducible, portable installs.
+- **Robust venv Creation:** If `uv` is not available, the installer falls back to `python -m venv` and `pip` for all venv and dependency operations.
+- **Improved Install UX:** All prompts and logic are available in both CLI and TUI modes, with clear user feedback and error handling.
+
+See the Configuration and GPU-Specific PyTorch Installation sections below for details.
