@@ -131,8 +131,8 @@ func createNewNode() {
 		return
 	}
 
-	customNodesDir := filepath.Join(appPaths.ComfyUIDir, "custom_nodes")
-	nodeDir := filepath.Join(customNodesDir, nodeName)
+	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
+	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
 
 	values := map[string]string{
 		"{{NodeName}}":      nodeName,
@@ -198,7 +198,7 @@ func listCustomNodes() {
 		return
 	}
 
-	customNodesDir := filepath.Join(appPaths.ComfyUIDir, "custom_nodes")
+	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
 	files, err := os.ReadDir(customNodesDir)
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to read custom nodes directory: %v", err)))
@@ -212,7 +212,7 @@ func listCustomNodes() {
 
 	// Parse active nodes from .env
 	activeNodes := map[string]bool{}
-	if envMap, err := internal.ReadEnvFile(appPaths.EnvFile); err == nil {
+	if envMap, err := internal.ReadEnvFile(internal.ExpandUserPath(appPaths.EnvFile)); err == nil {
 		if dirs, ok := envMap["COMFY_RELOAD_INCLUDE_DIRS"]; ok {
 			dirs = strings.Trim(dirs, "[]\"")
 			for _, d := range strings.Split(dirs, ",") {
@@ -301,7 +301,7 @@ func deleteCustomNode() {
 		return
 	}
 
-	customNodesDir := filepath.Join(appPaths.ComfyUIDir, "custom_nodes")
+	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
 	files, err := os.ReadDir(customNodesDir)
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to read custom nodes directory: %v", err)))
@@ -359,7 +359,7 @@ func deleteCustomNode() {
 		return
 	}
 
-	nodeDir := filepath.Join(customNodesDir, nodeName)
+	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
 	if err := os.RemoveAll(nodeDir); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to delete node '%s': %v", nodeName, err)))
 		return
@@ -390,7 +390,7 @@ func packNode() {
 		return
 	}
 
-	customNodesDir := filepath.Join(appPaths.ComfyUIDir, "custom_nodes")
+	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
 	files, err := os.ReadDir(customNodesDir)
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to read custom nodes directory: %v", err)))
@@ -423,8 +423,8 @@ func packNode() {
 		return
 	}
 
-	nodeDir := filepath.Join(customNodesDir, nodeName)
-	packedFilePath := filepath.Join(customNodesDir, nodeName+".zip")
+	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
+	packedFilePath := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName+".zip"))
 	err = zipDirectory(nodeDir, packedFilePath)
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to pack node '%s': %v", nodeName, err)))
@@ -444,11 +444,11 @@ func zipDirectory(srcDir, destZip string) error {
 	zipWriter := NewZipWriter(zipFile)
 	defer zipWriter.Close()
 
-	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	return filepath.Walk(internal.ExpandUserPath(srcDir), func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		relPath, err := filepath.Rel(srcDir, path)
+		relPath, err := filepath.Rel(internal.ExpandUserPath(srcDir), path)
 		if err != nil {
 			return err
 		}
@@ -482,8 +482,8 @@ func updateCustomNodes() {
 		return
 	}
 
-	customNodesDir := filepath.Join(appPaths.ComfyUIDir, "custom_nodes")
-	venvPython, err := internal.FindVenvPython(appPaths.ComfyUIDir)
+	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
+	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(appPaths.ComfyUIDir))
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Python executable not found in 'venv' or '.venv' under %s. Please ensure ComfyUI is installed correctly and the venv is set up (via the 'Install' option).", appPaths.ComfyUIDir)))
 		return
@@ -530,8 +530,8 @@ func updateCustomNodes() {
 	}
 
 	for _, node := range selected {
-		nodeDir := filepath.Join(customNodesDir, node)
-		reqFile := filepath.Join(nodeDir, "requirements.txt")
+		nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, node))
+		reqFile := internal.ExpandUserPath(filepath.Join(nodeDir, "requirements.txt"))
 		if _, err := os.Stat(reqFile); err != nil {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("requirements.txt not found for node '%s', skipping.", node)))
 			continue
@@ -573,7 +573,7 @@ func updateCustomNodes() {
 		if uvPath != "" {
 			fmt.Println(internal.InfoStyle.Render("Trying uv pip install -r requirements.txt ..."))
 			cmdUv := exec.Command(uvPath, "pip", "install", "-r", relReqFile)
-			cmdUv.Dir = appPaths.ComfyUIDir
+			cmdUv.Dir = internal.ExpandUserPath(appPaths.ComfyUIDir)
 			cmdUv.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
 			cmdUv.Stdout = os.Stdout
 			cmdUv.Stderr = os.Stderr
