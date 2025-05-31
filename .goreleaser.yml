@@ -1,4 +1,6 @@
 # .goreleaser.yml for comfy-chair-go
+version: 2
+
 project_name: comfy-chair
 builds:
   - id: comfy-chair
@@ -14,9 +16,8 @@ builds:
       - CGO_ENABLED=0
 archives:
   - id: default
-    builds:
-      - comfy-chair
-    format: tar.gz
+    formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
     files:
       - README.md
@@ -31,6 +32,3 @@ release:
   github:
     owner: regiellis
     name: comfy-chair-go
-    draft: false
-    prerelease: false
-    token: "{{ .Env.GITHUB_TOKEN }}"
