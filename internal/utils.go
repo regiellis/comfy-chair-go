@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"net"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -156,8 +159,22 @@ func (cfg *GlobalConfig) RemoveInstallByType(t InstallType) {
 	}
 }
 
+// ExpandUserPath replaces {HOME} and {USERPROFILE} with the user's home directory for cross-platform config paths.
+func ExpandUserPath(path string) string {
+	home, _ := os.UserHomeDir()
+	path = strings.ReplaceAll(path, "{HOME}", home)
+	if runtime.GOOS == "windows" {
+		userProfile := os.Getenv("USERPROFILE")
+		if userProfile != "" {
+			path = strings.ReplaceAll(path, "{USERPROFILE}", userProfile)
+		}
+	}
+	return filepath.Clean(path)
+}
+
 // ReadEnvFile reads a .env file and returns its key-value pairs.
 func ReadEnvFile(path string) (map[string]string, error) {
+	path = ExpandUserPath(path)
 	if _, err := os.Stat(path); err != nil {
 		return map[string]string{}, nil // treat missing as empty
 	}
@@ -166,11 +183,13 @@ func ReadEnvFile(path string) (map[string]string, error) {
 
 // WriteEnvFile writes the given key-value pairs to a .env file.
 func WriteEnvFile(path string, env map[string]string) error {
+	path = ExpandUserPath(path)
 	return godotenv.Write(env, path)
 }
 
 // UpdateEnvFile updates (or adds) the given keys in a .env file.
 func UpdateEnvFile(path string, updates map[string]string) error {
+	path = ExpandUserPath(path)
 	env, _ := ReadEnvFile(path)
 	for k, v := range updates {
 		env[k] = v
@@ -257,6 +276,7 @@ func PromptEditEnvFile(path string) error {
 
 // FindVenvPython returns the path to the Python executable in venv or .venv, or an error if not found.
 func FindVenvPython(comfyDir string) (string, error) {
+	comfyDir = ExpandUserPath(comfyDir)
 	venvDirs := []string{"venv", ".venv"}
 	for _, venv := range venvDirs {
 		venvPath := filepath.Join(comfyDir, venv)
@@ -271,4 +291,50 @@ func FindVenvPython(comfyDir string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("python executable not found in venv or .venv under %s", comfyDir)
+}
+
+// IsPortAvailable checks if a TCP port is available for listening.
+func IsPortAvailable(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
+}
+
+// GetAvailablePort finds the next available port starting from startPort.
+func GetAvailablePort(startPort int) int {
+	for port := startPort; port < startPort+1000; port++ {
+		if IsPortAvailable(port) {
+			return port
+		}
+	}
+	return -1 // No available port found in range
+}
+
+// PromptForPortConflict checks if the desired port is available, and if not, prompts the user to use another available port.
+func PromptForPortConflict(desiredPort int) (int, error) {
+	if IsPortAvailable(desiredPort) {
+		return desiredPort, nil
+	}
+	altPort := GetAvailablePort(desiredPort + 1)
+	if altPort == -1 {
+		return -1, fmt.Errorf("no available port found after %d", desiredPort)
+	}
+	useAlt := false
+	msg := fmt.Sprintf("Port %d is in use. Use available port %d instead?", desiredPort, altPort)
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().Title(msg).Value(&useAlt),
+		),
+	).WithTheme(huh.ThemeCharm())
+	if err := form.Run(); err != nil {
+		return -1, err
+	}
+	if useAlt {
+		return altPort, nil
+	}
+	return -1, fmt.Errorf("user declined to use alternative port")
 }

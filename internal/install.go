@@ -9,6 +9,29 @@ import (
 	"strings"
 )
 
+var defaultCustomNodes = []struct {
+	Name string
+	Repo string
+}{
+	{"ComfyUI-Manager", "https://github.com/Comfy-Org/ComfyUI-Manager.git"},
+	{"ComfyUI-Crystools", "https://github.com/crystian/ComfyUI-Crystools.git"},
+	{"rgthree-comfy", "https://github.com/rgthree/rgthree-comfy"},
+}
+
+// DefaultCustomNodes returns the list of default custom nodes and their repos.
+func DefaultCustomNodes() []struct {
+	Name string
+	Repo string
+} {
+	return defaultCustomNodes
+}
+
+// Exported version for use in migration logic
+var DefaultCustomNodesList = defaultCustomNodes
+
+// Export installNodeRequirements for migration use
+var InstallNodeRequirements = installNodeRequirements
+
 // InstallComfyUI performs the installation logic. It takes all required dependencies as parameters.
 // UI, error handling, and user prompts should be handled by the caller (main.go).
 func InstallComfyUI(
@@ -22,6 +45,70 @@ func InstallComfyUI(
 ) error {
 	// ...existing code from installComfyUI, refactored to use parameters and return errors instead of printing...
 	// All UI and error printing should be handled by the caller.
+
+	// In the install logic, after setting up the environment and before finishing:
+	for _, node := range defaultCustomNodes {
+		nodePath := filepath.Join(ExpandUserPath(appPaths.ComfyUIDir), "custom_nodes", node.Name)
+		if _, err := os.Stat(nodePath); os.IsNotExist(err) {
+			fmt.Println(InfoStyle.Render("Cloning default node: " + node.Name))
+			cmd := exec.Command("git", "clone", node.Repo, nodePath)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			_ = cmd.Run()
+		}
+		// After cloning, install requirements if present
+		reqFile := filepath.Join(nodePath, "requirements.txt")
+		venvPython, err := FindVenvPython(ExpandUserPath(appPaths.ComfyUIDir))
+		if err == nil {
+			venvBin := filepath.Join(filepath.Dir(filepath.Dir(venvPython)), "bin")
+			uvPath := filepath.Join(venvBin, "uv")
+			if _, err := os.Stat(uvPath); err == nil {
+				// Ensure pip is installed in the venv
+				cmdPip := exec.Command(uvPath, "pip", "install", "-U", "pip")
+				cmdPip.Dir = ExpandUserPath(appPaths.ComfyUIDir)
+				cmdPip.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
+				cmdPip.Stdout = os.Stdout
+				cmdPip.Stderr = os.Stderr
+				_ = cmdPip.Run()
+				// Install requirements if present
+				if _, err := os.Stat(reqFile); err == nil {
+					cmdReq := exec.Command(uvPath, "pip", "install", "-r", reqFile)
+					cmdReq.Dir = nodePath
+					cmdReq.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
+					cmdReq.Stdout = os.Stdout
+					cmdReq.Stderr = os.Stderr
+					if err := cmdReq.Run(); err != nil {
+						// Fallback to pip if uv fails
+						pipPath := filepath.Join(venvBin, "pip")
+						if _, err := os.Stat(pipPath); err == nil {
+							cmdPip2 := exec.Command(pipPath, "install", "-r", reqFile)
+							cmdPip2.Dir = nodePath
+							cmdPip2.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
+							cmdPip2.Stdout = os.Stdout
+							cmdPip2.Stderr = os.Stderr
+							_ = cmdPip2.Run()
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// After venv/uv setup, install comfy-cli:
+	venvPython, err := FindVenvPython(ExpandUserPath(appPaths.ComfyUIDir))
+	if err == nil {
+		venvBin := filepath.Join(filepath.Dir(filepath.Dir(venvPython)), "bin")
+		uvPath := filepath.Join(venvBin, "uv")
+		if _, err := os.Stat(uvPath); err == nil {
+			cmd := exec.Command(uvPath, "pip", "install", "comfy-cli")
+			cmd.Dir = ExpandUserPath(appPaths.ComfyUIDir)
+			cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			_ = cmd.Run()
+		}
+	}
+
 	return nil
 }
 
@@ -35,6 +122,9 @@ func CloneComfyUI(comfyUIRepoURL, installPath string, executeCommand func(string
 
 // CopyAndInstallCustomNodes copies selected custom node directories from src to dst, skipping venv/.venv, and installs requirements with uv or pip.
 func CopyAndInstallCustomNodes(srcCustomNodes, dstCustomNodes, venvPath string, nodeNames []string) error {
+	srcCustomNodes = ExpandUserPath(srcCustomNodes)
+	dstCustomNodes = ExpandUserPath(dstCustomNodes)
+	venvPath = ExpandUserPath(venvPath)
 	for _, node := range nodeNames {
 		if node == "venv" || node == ".venv" {
 			continue
