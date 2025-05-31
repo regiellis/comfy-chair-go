@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"net"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
