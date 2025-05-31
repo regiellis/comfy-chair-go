@@ -19,8 +19,7 @@ archives:
       - README.md
       - LICENSE
       - .env.example
-      - templates/**/*
-      - demos/**/*
+      
 checksum:
   name_template: "checksums.txt"
 release:
