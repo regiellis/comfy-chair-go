@@ -33,7 +33,6 @@ var DefaultCustomNodesList = defaultCustomNodes
 var InstallNodeRequirements = installNodeRequirements
 
 // InstallComfyUI performs the installation logic. It takes all required dependencies as parameters.
-// UI, error handling, and user prompts should be handled by the caller (main.go).
 func InstallComfyUI(
 	appPaths *Paths,
 	findSystemPython func() (string, error),
@@ -43,8 +42,6 @@ func InstallComfyUI(
 	promptInstall func(defaultInstallPath, foundSystemPython string) (installPath, systemPythonExec string, proceed bool),
 	promptConfirmPython func(systemPythonExec, outputPyVersion string) bool,
 ) error {
-	// ...existing code from installComfyUI, refactored to use parameters and return errors instead of printing...
-	// All UI and error printing should be handled by the caller.
 
 	// In the install logic, after setting up the environment and before finishing:
 	for _, node := range defaultCustomNodes {
