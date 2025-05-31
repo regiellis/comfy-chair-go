@@ -28,7 +28,10 @@ archives:
       - demos/**/*
 checksum:
   name_template: "checksums.txt"
+
 release:
   github:
-    owner: regiellis
-    name: comfy-chair-go
+    owner: ${{ github.repository_owner }}
+    name: ${{ github.event.repository.name }}
+
+signs: []
