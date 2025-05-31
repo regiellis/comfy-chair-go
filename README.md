@@ -34,6 +34,8 @@
 - 🧹 **Clean & List:** Easily list and delete custom nodes.
 - 💻 **Cross-Platform:** Works on Linux, macOS, and Windows. Binaries are built for all major OS/arch on every release.
 - 🧑‍💻 **Developer Focused:** Built by a developer, for developers. No more manual file copying or error-prone node setup.
+- 🛡️ **Port Conflict Detection:** Automatically checks if the default ComfyUI port (8188) is in use before starting. If the port is unavailable, you'll be prompted to use the next available port, ensuring smooth cross-platform operation.
+- 🏠 **Portable Path Support:** All config and environment paths now support portable placeholders like `{HOME}` and `{USERPROFILE}` for robust cross-platform compatibility.
 
 ## 🚀 Quick Start
 
