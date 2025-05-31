@@ -37,6 +37,10 @@
 - 🛡️ **Port Conflict Detection:** Automatically checks if the default ComfyUI port (8188) is in use before starting. If the port is unavailable, you'll be prompted to use the next available port, ensuring smooth cross-platform operation.
 - 🏠 **Portable Path Support:** All config and environment paths now support portable placeholders like `{HOME}` and `{USERPROFILE}` for robust cross-platform compatibility.
 
+
+### Install in Realtime
+![Install Demo](demos/demo-install.gif)
+
 ## 🚀 Quick Start
 
 ### Download a Release

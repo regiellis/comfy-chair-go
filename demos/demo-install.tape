@@ -1,4 +1,4 @@
-Output demo-install.mp4
+Output demo-install.gif
 
 Set FontSize 16
 Set Width 1200

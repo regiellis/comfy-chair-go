@@ -93,10 +93,8 @@ func initPaths() error {
 
 	// Load .env file from CLI directory
 	err = godotenv.Load(appPaths.EnvFile)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Could not load .env file at %s: %v", appPaths.EnvFile, err)))
-		}
+	if (err != nil) && (!os.IsNotExist(err)) {
+		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Could not load .env file at %s: %v", appPaths.EnvFile, err)))
 		// If .env does not exist, it's not an error yet.
 	}
 
@@ -971,123 +969,62 @@ func writePIDForEnv(pid int, pidFile string) error {
 	return err
 }
 
-func stopComfyUI() {
-	pidFile := appPaths.PidFile
-	pid, isRunning := getRunningPIDForEnv(pidFile)
-
-	if !isRunning {
-		if pid != 0 {
-			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Found stale PID file for PID %d (process not running). Removing PID file: %s", pid, pidFile)))
-			os.Remove(internal.ExpandUserPath(pidFile))
-		} else {
-			fmt.Println(internal.InfoStyle.Render("ComfyUI is not running in the background (or PID file not found/readable)."))
-		}
+func removeEnv() {
+	// Prompt for environment to remove
+	cfg, err := internal.LoadGlobalConfig()
+	if err != nil || len(cfg.Installs) == 0 {
+		fmt.Println(internal.ErrorStyle.Render("No environments configured to remove."))
 		return
 	}
-
-	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Stopping ComfyUI (PID: %d)...", pid)))
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to find process with PID %d, though it was reported as running: %v", pid, err)))
-		os.Remove(internal.ExpandUserPath(pidFile))
-		return
-	}
-	var killErr error
-	if runtime.GOOS == "windows" {
-		killErr = process.Kill()
-	} else {
-		killErr = process.Signal(syscall.SIGTERM)
-	}
-	if killErr != nil {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to send termination signal to PID %d: %v. It might have already exited.", pid, killErr)))
-		if !isProcessRunning(pid) {
-			os.Remove(internal.ExpandUserPath(pidFile))
-		}
-		return
-	}
-	if err := waitForComfyUIStop(pid); err != nil {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) did not stop gracefully: %v. Forcing stop.", pid, err)))
-		if forceKillErr := process.Kill(); forceKillErr != nil {
-			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to force kill PID %d: %v", pid, forceKillErr)))
-		} else {
-			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) force killed.", pid)))
-		}
-	} else {
-		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) stopped.", pid)))
-	}
-	os.Remove(internal.ExpandUserPath(pidFile))
-}
-
-func restartComfyUI() {
-	pidFile := appPaths.PidFile
-	pid, isRunning := getRunningPIDForEnv(pidFile)
-	if isRunning {
-		stopComfyUI()
-		fmt.Println(internal.InfoStyle.Render("Waiting a few seconds before restarting..."))
-		time.Sleep(3 * time.Second)
-	} else {
-		if pid != 0 {
-			fmt.Println(internal.InfoStyle.Render("Previous ComfyUI process was not running (stale PID found and cleaned)."))
-		}
-	}
-	startComfyUI(true)
-}
-
-func statusComfyUI() {
-	cfg, _ := internal.LoadGlobalConfig()
-	envLabels := map[internal.InstallType]string{
-		internal.LoungeInstall: "Lounge (Main/Stable)",
-		internal.DenInstall:    "Den (Dev/Alternate)",
-		internal.NookInstall:   "Nook (Experimental/Test)",
-	}
-
-	fmt.Println(internal.TitleStyle.Render("ComfyUI Environments Status"))
-	if len(cfg.Installs) == 0 {
-		fmt.Println(internal.InfoStyle.Render("No environments configured. Use 'Manage Environments' to add one."))
-		return
-	}
-	for _, t := range []internal.InstallType{internal.LoungeInstall, internal.DenInstall, internal.NookInstall} {
-		inst := cfg.FindInstallByType(t)
-		label := envLabels[t]
-		if inst == nil {
-			fmt.Printf("%s: %s\n", label, internal.WarningStyle.Render("Not configured"))
-			continue
-		}
+	// Prepare options
+	var envOptions []huh.Option[string]
+	for _, inst := range cfg.Installs {
+		label := string(inst.Type)
 		if inst.IsDefault {
-			label = "* " + label + " (default)"
+			label += " (default)"
 		}
-		fmt.Println(internal.TitleStyle.Render(label))
-		fmt.Printf("  Path: %s\n", inst.Path)
-		venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(inst.Path))
-		venvPath := ""
-		if err == nil {
-			venvPath = internal.ExpandUserPath(filepath.Dir(filepath.Dir(venvPython)))
-			fmt.Printf("  Virtualenv: %s\n", venvPath)
-			fmt.Printf("  Python: %s\n", venvPython)
-		} else {
-			fmt.Printf("  Virtualenv: %s\n", internal.WarningStyle.Render("Not found (no venv or .venv)"))
-			fmt.Printf("  Python: %s\n", internal.WarningStyle.Render("Not found (no venv or .venv)"))
+		if inst.Name != "" && inst.Name != string(inst.Type) {
+			label += " - " + inst.Name
 		}
-		pidFile := internal.ExpandUserPath(filepath.Join(filepath.Dir(inst.Path), "comfyui.pid"))
-		pid, isRunning := 0, false
-		if f, err := os.Open(pidFile); err == nil {
-			var pidVal int
-			fmt.Fscanf(f, "%d", &pidVal)
-			f.Close()
-			if pidVal > 0 {
-				pid = pidVal
-				isRunning = isProcessRunning(pid)
-			}
-		}
-		if isRunning {
-			fmt.Printf("  Status: %s (PID: %d)\n", internal.SuccessStyle.Render("Running"), pid)
-		} else if pid != 0 {
-			fmt.Printf("  Status: %s (stale PID: %d)\n", internal.WarningStyle.Render("Not running, stale PID file found"), pid)
-		} else {
-			fmt.Printf("  Status: %s\n", internal.InfoStyle.Render("Not running"))
-		}
-		fmt.Println()
+		envOptions = append(envOptions, huh.NewOption(label, string(inst.Type)))
 	}
+	var selectedEnv string
+	form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Select environment to remove (disconnect):").Options(envOptions...).Value(&selectedEnv))).WithTheme(huh.ThemeCharm())
+	_ = form.Run()
+	if selectedEnv == "" {
+		fmt.Println(internal.InfoStyle.Render("No environment selected. Operation cancelled."))
+		return
+	}
+	inst := cfg.FindInstallByType(internal.InstallType(selectedEnv))
+	if inst == nil {
+		fmt.Println(internal.ErrorStyle.Render("Selected environment not found in config."))
+		return
+	}
+	if inst.Type == internal.LoungeInstall {
+		fmt.Println(internal.WarningStyle.Render("Warning: You are about to disconnect the Lounge (main) environment. This is your primary environment!"))
+	}
+	var confirm bool
+	form2 := huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Are you sure you want to disconnect this environment? This will NOT delete any files on disk.").Value(&confirm))).WithTheme(huh.ThemeCharm())
+	_ = form2.Run()
+	if !confirm {
+		fmt.Println(internal.InfoStyle.Render("Operation cancelled by user."))
+		return
+	}
+	cfg.RemoveInstallByType(inst.Type)
+	if err := internal.SaveGlobalConfig(cfg); err != nil {
+		fmt.Println(internal.ErrorStyle.Render("Failed to update config: " + err.Error()))
+		return
+	}
+	fmt.Println(internal.SuccessStyle.Render("Environment disconnected from Comfy Chair config."))
+	// Platform-specific instructions
+	fmt.Println(internal.InfoStyle.Render("\nTo delete the environment files from disk, run the following command in your terminal:"))
+	if runtime.GOOS == "windows" {
+		fmt.Println("  rmdir /S /Q \"" + inst.Path + "\"")
+	} else {
+		fmt.Println("  rm -rf \"" + inst.Path + "\"")
+	}
+	fmt.Println(internal.WarningStyle.Render("This will permanently delete all files in the environment directory. Use with caution!"))
+	return
 }
 
 func printUsage() {
@@ -1294,6 +1231,9 @@ func main() {
 		case "migrate-nodes":
 			migrateCustomNodes()
 			os.Exit(0)
+		case "remove_env":
+			removeEnv()
+			os.Exit(0)
 		default:
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Unknown argument: %s", arg)))
 			printUsage()
@@ -1324,7 +1264,8 @@ func main() {
 						huh.NewOption("Sync .env with .env.example", "sync-env"),
 						huh.NewOption("Status (ComfyUI)", "status"),
 						huh.NewOption("Set Working Environment", "set_working_env"),
-						huh.NewOption("Migrate Custom Nodes", "migrate_nodes"),
+						huh.NewOption("Migrate Custom Nodes", "migrate-nodes"),
+						huh.NewOption("Remove Environment (Disconnects, doesn't delete files)", "remove_env"),
 						huh.NewOption("Exit", "exit"),
 					).
 					Value(&choice),
@@ -1496,6 +1437,9 @@ func main() {
 			return
 		case "migrate-nodes":
 			migrateCustomNodes()
+		case "remove_env":
+			removeEnv()
+			os.Exit(0)
 		case "exit":
 			fmt.Println(internal.InfoStyle.Render("Exiting."))
 			os.Exit(0)
@@ -1677,12 +1621,8 @@ func manageBrandedEnvironments() {
 		case "update":
 			updateComfyUI()
 		case "remove":
-			cfg.RemoveInstallByType(envType)
-			if err := internal.SaveGlobalConfig(cfg); err != nil {
-				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to save global config: %v", err)))
-				return
-			}
-			fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("%s environment removed.", labels[envType])))
+			removeEnvironment(inst)
+			return
 		}
 	}
 }
@@ -1718,7 +1658,7 @@ func syncEnvWithExample() error {
 func selectEnvOrDefault(prompt string) (*internal.ComfyInstall, error) {
 	cfg, _ := internal.LoadGlobalConfig()
 	if len(cfg.Installs) == 0 {
-		return nil, fmt.Errorf("No environments configured.")
+		return nil, fmt.Errorf("no environments configured")
 	}
 	var envOptions []huh.Option[string]
 	for _, inst := range cfg.Installs {
@@ -1763,7 +1703,12 @@ func runWithEnvConfirmation(cmdName string, action func(*internal.ComfyInstall))
 	if inst.Type == internal.LoungeInstall {
 		color = internal.WarningStyle
 	}
-	fmt.Println(color.Render(fmt.Sprintf("%s %s: %s", icon, strings.Title(string(inst.Type)), inst.Path)))
+	// Use a simple upper-case for the first letter instead of strings.Title (deprecated)
+	typeLabel := string(inst.Type)
+	if len(typeLabel) > 0 {
+		typeLabel = strings.ToUpper(typeLabel[:1]) + typeLabel[1:]
+	}
+	fmt.Println(color.Render(fmt.Sprintf("%s %s: %s", icon, typeLabel, inst.Path)))
 	if inst.Type == internal.LoungeInstall && (cmdName == "update" || cmdName == "replace" || cmdName == "delete") {
 		var confirm bool
 		form := huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("You are about to perform a potentially destructive action on Lounge (source of truth). Are you sure?").Value(&confirm))).WithTheme(huh.ThemeCharm())
@@ -1970,11 +1915,13 @@ func updateComfyUIWithEnv(inst *internal.ComfyInstall) {
 				fmt.Println(internal.InfoStyle.Render("Please resolve the git issue in your ComfyUI directory, then retry the update."))
 				return
 			}
+		} else {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update ComfyUI (git pull): %v", err)))
+			return
 		}
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update ComfyUI (git pull): %v", err)))
-		return
+	} else {
+		fmt.Println(internal.SuccessStyle.Render("Git pull successful."))
 	}
-	fmt.Println(internal.SuccessStyle.Render("Git pull successful."))
 	fmt.Println(internal.InfoStyle.Render("Updating Python dependencies..."))
 	reqTxt := internal.ExpandUserPath(filepath.Join(comfyDir, "requirements.txt"))
 	if _, err := os.Stat(reqTxt); os.IsNotExist(err) {
@@ -2017,16 +1964,16 @@ func statusComfyUIWithEnv(inst *internal.ComfyInstall) {
 	} else {
 		chosenEnvFile = envFileCU // fallback for error message
 	}
-	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("[DEBUG] Reading .env from: %s", chosenEnvFile)))
+	// fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("[DEBUG] Reading .env from: %s", chosenEnvFile)))
 	envVars, envErr := internal.ReadEnvFile(chosenEnvFile)
-	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("[DEBUG] .env contents: %+v", envVars)))
+	// fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("[DEBUG] .env contents: %+v", envVars)))
 	missingVars := []string{}
 	if envErr != nil {
 		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Could not read .env file at %s: %v", chosenEnvFile, envErr)))
 		missingVars = append(missingVars, "COMFYUI_PATH")
 	} else {
 		val := envVars["COMFYUI_PATH"]
-		fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("[DEBUG] Parsed COMFYUI_PATH: '%s'", val)))
+		// fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("[DEBUG] Parsed COMFYUI_PATH: '%s'", val)))
 		if val == "" {
 			missingVars = append(missingVars, "COMFYUI_PATH")
 		}
@@ -2189,6 +2136,41 @@ func migrateCustomNodes() {
 		var err error
 		if method == "copy" {
 			err = internal.CopyAndInstallCustomNodes(srcCustomNodesDir, dstCustomNodesDir, dst.Path+"/venv", []string{node})
+			// After copy, try to install requirements.txt with uv or pip
+			reqFile := internal.ExpandUserPath(filepath.Join(dstCustomNodesDir, node, "requirements.txt"))
+			venvPython, venvErr := internal.FindVenvPython(dst.Path)
+			venvBin := filepath.Join(filepath.Dir(filepath.Dir(venvPython)), "bin")
+			uvPath, _ := exec.LookPath("uv")
+			if venvErr == nil && err == nil {
+				if _, statErr := os.Stat(reqFile); statErr == nil {
+					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Installing requirements for '%s' in %s...", node, reqFile)))
+					if uvPath != "" {
+						cmd := exec.Command(uvPath, "pip", "install", "-r", reqFile)
+						cmd.Dir = filepath.Join(dstCustomNodesDir, node)
+						cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+filepath.Dir(filepath.Dir(venvPython)))
+						cmd.Stdout = os.Stdout
+						cmd.Stderr = os.Stderr
+						if uvErr := cmd.Run(); uvErr == nil {
+							fmt.Println(internal.SuccessStyle.Render("uv pip install succeeded."))
+						} else {
+							fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("uv pip install failed: %v. Falling back to pip...", uvErr)))
+							pipPath := filepath.Join(venvBin, "pip")
+							if _, pipStat := os.Stat(pipPath); pipStat == nil {
+								cmdPip := exec.Command(pipPath, "install", "-r", reqFile)
+								cmdPip.Dir = filepath.Join(dstCustomNodesDir, node)
+								cmdPip.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+filepath.Dir(filepath.Dir(venvPython)))
+								cmdPip.Stdout = os.Stdout
+								cmdPip.Stderr = os.Stderr
+								if pipErr := cmdPip.Run(); pipErr == nil {
+									fmt.Println(internal.SuccessStyle.Render("pip install succeeded."))
+								} else {
+									fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("pip install failed: %v", pipErr)))
+								}
+							}
+						}
+					}
+				}
+			}
 		} else if method == "github" && repoURL != "" {
 			dstDir := internal.ExpandUserPath(filepath.Join(dstCustomNodesDir, node))
 			_ = os.RemoveAll(dstDir)
@@ -2213,4 +2195,41 @@ func migrateCustomNodes() {
 		}
 		fmt.Printf("  %s: %s (%s)\n", r.Node, r.Method, status)
 	}
+}
+
+// removeEnvironment disconnects an environment from the config without deleting files.
+func removeEnvironment(inst *internal.ComfyInstall) {
+	if inst == nil {
+		fmt.Println(internal.ErrorStyle.Render("No environment selected or found."))
+		return
+	}
+	if inst.Type == internal.LoungeInstall {
+		fmt.Println(internal.WarningStyle.Render("Warning: You are about to disconnect the Lounge (main) environment. This is your primary environment!"))
+	}
+	var confirm bool
+	form := huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Are you sure you want to disconnect this environment? This will NOT delete any files on disk.").Value(&confirm))).WithTheme(huh.ThemeCharm())
+	_ = form.Run()
+	if !confirm {
+		fmt.Println(internal.InfoStyle.Render("Operation cancelled by user."))
+		return
+	}
+	cfg, err := internal.LoadGlobalConfig()
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render("Failed to load config: " + err.Error()))
+		return
+	}
+	cfg.RemoveInstallByType(inst.Type)
+	if err := internal.SaveGlobalConfig(cfg); err != nil {
+		fmt.Println(internal.ErrorStyle.Render("Failed to update config: " + err.Error()))
+		return
+	}
+	fmt.Println(internal.SuccessStyle.Render("Environment disconnected from Comfy Chair config."))
+	// Platform-specific instructions
+	fmt.Println(internal.InfoStyle.Render("\nTo delete the environment files from disk, run the following command in your terminal:"))
+	if runtime.GOOS == "windows" {
+		fmt.Println("  rmdir /S /Q \"" + inst.Path + "\"")
+	} else {
+		fmt.Println("  rm -rf \"" + inst.Path + "\"")
+	}
+	fmt.Println(internal.WarningStyle.Render("This will permanently delete all files in the environment directory. Use with caution!"))
 }
