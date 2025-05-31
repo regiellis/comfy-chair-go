@@ -1,6 +1,4 @@
 # .goreleaser.yml for comfy-chair-go
-version: 2
-
 project_name: comfy-chair
 builds:
   - id: comfy-chair
@@ -15,10 +13,8 @@ builds:
     env:
       - CGO_ENABLED=0
 archives:
-  - id: default
-    formats:
-      - tar.gz
-    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+  - name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    format: tar.gz
     files:
       - README.md
       - LICENSE
@@ -28,10 +24,7 @@ archives:
       - demos/**/*
 checksum:
   name_template: "checksums.txt"
-
 release:
   github:
-    owner: ${{ github.repository_owner }}
-    name: ${{ github.event.repository.name }}
-
-signs: []
+    owner: regiellis
+    name: comfy-chair-go
