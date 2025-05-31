@@ -19,7 +19,6 @@ archives:
       - README.md
       - LICENSE
       - .env.example
-      - comfy-installs.json
       - templates/**/*
       - demos/**/*
 checksum:
