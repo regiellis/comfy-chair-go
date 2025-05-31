@@ -530,6 +530,40 @@ func installComfyUI() {
 	}
 	installPath, _ = filepath.Abs(installPath)
 
+	// Prompt for GPU_TYPE and PYTHON_VERSION if not set in .env
+	envVars, _ := internal.ReadEnvFile(appPaths.EnvFile)
+	gpuType := envVars["GPU_TYPE"]
+	pythonVersion := envVars["PYTHON_VERSION"]
+	if gpuType == "" {
+		var gpuOpt string
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Select your GPU type for PyTorch install").
+				Options(
+					huh.NewOption("Nvidia (CUDA)", "nvidia"),
+					huh.NewOption("AMD (ROCm, Linux only)", "amd"),
+					huh.NewOption("Intel (Arc/XPU)", "intel"),
+					huh.NewOption("Apple Silicon (Metal)", "apple"),
+					huh.NewOption("DirectML (AMD/Windows)", "directml"),
+					huh.NewOption("Ascend NPU", "ascend"),
+					huh.NewOption("Cambricon MLU", "cambricon"),
+					huh.NewOption("CPU Only", "cpu"),
+				).
+				Value(&gpuOpt),
+		)).WithTheme(huh.ThemeCharm())
+		_ = form.Run()
+		gpuType = gpuOpt
+	}
+	if pythonVersion == "" {
+		var pyVer string = "3.12"
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewInput().Title("Python version for venv (3.12 recommended, 3.13 supported)").Value(&pyVer).Placeholder("3.12"),
+		)).WithTheme(huh.ThemeCharm())
+		_ = form.Run()
+		pythonVersion = pyVer
+	}
+	internal.UpdateEnvFile(appPaths.EnvFile, map[string]string{"GPU_TYPE": gpuType, "PYTHON_VERSION": pythonVersion})
+
 	// 3. Check for existing install/config
 	exists := false
 	if stat, err := os.Stat(internal.ExpandUserPath(installPath)); err == nil && stat.IsDir() {

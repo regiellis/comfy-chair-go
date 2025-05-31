@@ -106,6 +106,51 @@ func InstallComfyUI(
 		}
 	}
 
+	// --- Install torch/torchvision/torchaudio for selected GPU ---
+	envVars, _ := ReadEnvFile(filepath.Join(appPaths.CliDir, ".env"))
+	gpuType := envVars["GPU_TYPE"]
+	pythonVersion := envVars["PYTHON_VERSION"]
+	if pythonVersion == "" {
+		pythonVersion = "3.12"
+	}
+	venvPython, err = FindVenvPython(ExpandUserPath(appPaths.ComfyUIDir))
+	if err == nil {
+		venvBin := filepath.Join(filepath.Dir(filepath.Dir(venvPython)), "bin")
+		pipPath := filepath.Join(venvBin, "pip")
+		var torchCmd []string
+		switch strings.ToLower(gpuType) {
+		case "nvidia":
+			torchCmd = []string{"install", "torch", "torchvision", "torchaudio", "--extra-index-url", "https://download.pytorch.org/whl/cu128"}
+		case "amd":
+			torchCmd = []string{"install", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/rocm6.3"}
+		case "intel":
+			torchCmd = []string{"install", "--pre", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/nightly/xpu"}
+		case "apple":
+			fmt.Println(InfoStyle.Render("Apple Silicon: Please follow the official PyTorch nightly install instructions for Metal backend. See: https://developer.apple.com/metal/pytorch/"))
+		case "directml":
+			torchCmd = []string{"install", "torch-directml"}
+		case "ascend":
+			fmt.Println(InfoStyle.Render("Ascend NPU: Please follow the official torch-npu install instructions. See: https://www.hiascend.com/software/modelzoo/tool/torch-npu"))
+		case "cambricon":
+			fmt.Println(InfoStyle.Render("Cambricon MLU: Please follow the official torch_mlu install instructions. See: https://www.cambricon.com/"))
+		case "cpu":
+			torchCmd = []string{"install", "torch", "torchvision", "torchaudio"}
+		}
+		if len(torchCmd) > 0 {
+			fmt.Println(InfoStyle.Render("Installing PyTorch for your GPU in the venv..."))
+			cmd := exec.Command(pipPath, torchCmd...)
+			cmd.Dir = ExpandUserPath(appPaths.ComfyUIDir)
+			cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Println(WarningStyle.Render("PyTorch install failed. You may need to install manually. See README for details."))
+			} else {
+				fmt.Println(SuccessStyle.Render("PyTorch installed successfully for your GPU."))
+			}
+		}
+	}
+
 	return nil
 }
 
