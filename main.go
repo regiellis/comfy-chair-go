@@ -1089,359 +1089,379 @@ func main() {
 		os.Exit(1)
 	}
 
-	// If not configured, prompt user to install, set path, or exit
-	for !appPaths.IsConfigured {
-		var action string
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("ComfyUI is not configured. What would you like to do?").
-					Options(
-						huh.NewOption("Install/Reconfigure ComfyUI", "install"),
-						huh.NewOption("Set path to existing ComfyUI install", "set_path"),
-						huh.NewOption("Exit", "exit"),
-					).
-					Value(&action),
-			),
-		).WithTheme(huh.ThemeCharm())
-		_ = form.Run()
-		if action == "install" {
-			installComfyUI()
-			_ = initPaths()
-		} else if action == "set_path" {
-			var path string
-			form2 := huh.NewForm(huh.NewGroup(huh.NewInput().Title("Enter path to existing ComfyUI install").Value(&path))).WithTheme(huh.ThemeCharm())
-			_ = form2.Run()
-			if path != "" {
-				// Ensure trailing slash
-				if !strings.HasSuffix(path, string(os.PathSeparator)) {
-					path = path + string(os.PathSeparator)
-					fmt.Println(internal.InfoStyle.Render("Added trailing '/' to path: " + path))
-				}
-				if stat, err := os.Stat(internal.ExpandUserPath(path)); err == nil && stat.IsDir() {
-					_ = saveComfyUIPathToEnv(path)
-					// Debug: print .env contents after writing
-					fmt.Println(internal.InfoStyle.Render("[DEBUG] .env after saveComfyUIPathToEnv:"))
-					if envMap, err := godotenv.Read(appPaths.EnvFile); err == nil {
-						fmt.Println(envMap)
-					} else {
-						fmt.Println("[DEBUG] Could not read .env after write:", err)
-					}
-					_ = initPaths()
-					if appPaths.IsConfigured {
-						fmt.Println(internal.SuccessStyle.Render("ComfyUI path configured successfully."))
-					} else {
-						fmt.Println(internal.ErrorStyle.Render("The provided path is not a valid ComfyUI install. Please try again."))
-					}
-				} else {
-					fmt.Println(internal.ErrorStyle.Render("The provided path does not exist or is not a directory."))
+	// Support short CLI commands (e.g., comfy-chair start, stop, update, etc.)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "start", "start_fg", "start-fg":
+			runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, false) })
+			return
+		case "background", "start_bg", "start-bg":
+			runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, true) })
+			return
+		case "stop":
+			runWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) })
+			return
+		case "restart":
+			runWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) })
+			return
+		case "update":
+			runWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) })
+			return
+		case "reload":
+			watchDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
+			exts := []string{".py", ".js", ".css"}
+			debounce := 5
+			if val := os.Getenv("COMFY_RELOAD_EXTS"); val != "" {
+				exts = strings.Split(val, ",")
+				for i := range exts {
+					exts[i] = strings.TrimSpace(exts[i])
 				}
 			}
-		} else {
-			fmt.Println(internal.InfoStyle.Render("Exiting."))
+			if val := os.Getenv("COMFY_RELOAD_DEBOUNCE"); val != "" {
+				if d, err := strconv.Atoi(val); err == nil && d > 0 {
+					debounce = d
+				}
+			}
+			includedDirs := []string{}
+			if val := os.Getenv("COMFY_RELOAD_INCLUDE_DIRS"); val != "" {
+				for _, d := range strings.Split(val, ",") {
+					trimmed := strings.TrimSpace(d)
+					if trimmed != "" {
+						includedDirs = append(includedDirs, trimmed)
+					}
+				}
+			}
+			reloadComfyUI(watchDir, debounce, exts, includedDirs)
+			return
+		case "install":
+			installComfyUI()
+			return
+		case "status":
+			runWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) })
+			return
+		case "update-nodes":
+			updateCustomNodes()
+			return
+		case "create_node", "create-node":
+			createNewNode()
+			return
+		case "list_nodes", "list-nodes":
+			listCustomNodes()
+			return
+		case "delete_node", "delete-node":
+			deleteCustomNode()
+			return
+		case "pack_node", "pack-node":
+			packNode()
+			return
+		case "migrate-nodes":
+			migrateCustomNodes()
+			return
+		case "remove_env":
+			removeEnv()
+			return
+		case "sync-env":
+			err := syncEnvWithExample()
+			if err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to sync .env: %v", err)))
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "help", "--help", "-h":
+			printUsage()
 			os.Exit(0)
 		}
 	}
 
-	if len(os.Args) > 1 {
-		arg := os.Args[1]
-		switch arg {
-		// ... (no change to this section)
-		// (keep as is)
-		}
-	} else {
-		// Menu loop: keep showing menus until a final actionable choice or exit
+	// Menu loop: keep showing menus until a final actionable choice or exit
+	for {
+		var choice string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title(internal.TitleStyle.Render("Comfy Chair Manager")).
+					Description("Select an action:").
+					Options(
+						huh.NewOption("Start/Stop/Restart", "main_actions"),
+						huh.NewOption("Node Management", "node_mgmt"),
+						huh.NewOption("Environment Management", "env_mgmt"),
+						huh.NewOption("Other Tools", "other_tools"),
+						huh.NewOption("Exit", "exit"),
+					).
+					Value(&choice),
+			),
+		).WithTheme(huh.ThemeCharm())
+		_ = form.Run()
+
+		// Nested menu logic in a loop
 		for {
-			var choice string
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewSelect[string]().
-						Title(internal.TitleStyle.Render("Comfy Chair Manager")).
-						Description("Select an action:").
-						Options(
-							huh.NewOption("Start/Stop/Restart", "main_actions"),
-							huh.NewOption("Node Management", "node_mgmt"),
-							huh.NewOption("Environment Management", "env_mgmt"),
-							huh.NewOption("Other Tools", "other_tools"),
-							huh.NewOption("Exit", "exit"),
-						).
-						Value(&choice),
-				),
-			).WithTheme(huh.ThemeCharm())
-			_ = form.Run()
-
-			// Nested menu logic in a loop
-			for {
-				if choice == "main_actions" {
-					var subChoice string
-					form := huh.NewForm(
-						huh.NewGroup(
-							huh.NewSelect[string]().
-								Title("Start/Stop/Restart").
-								Options(
-									huh.NewOption("Start ComfyUI (Foreground)", "start_fg"),
-									huh.NewOption("Start ComfyUI (Background)", "start_bg"),
-									huh.NewOption("Stop ComfyUI", "stop"),
-									huh.NewOption("Restart ComfyUI (Background)", "restart"),
-									huh.NewOption("Update ComfyUI", "update"),
-									huh.NewOption("Install/Reconfigure ComfyUI", "install"),
-									huh.NewOption("Status (ComfyUI)", "status"),
-									huh.NewOption("More Tools", "back"),
-								).
-								Value(&subChoice),
-						),
-					).WithTheme(huh.ThemeCharm())
-					_ = form.Run()
-					if subChoice == "back" || subChoice == "" {
-						choice = ""
-						break
-					}
-					choice = subChoice
-				} else if choice == "node_mgmt" {
-					var subChoice string
-					form := huh.NewForm(
-						huh.NewGroup(
-							huh.NewSelect[string]().
-								Title("Node Management").
-								Options(
-									huh.NewOption("Create New Node", "create_node"),
-									huh.NewOption("List Custom Nodes", "list_nodes"),
-									huh.NewOption("Delete Custom Node", "delete_node"),
-									huh.NewOption("Pack Custom Node", "pack_node"),
-									huh.NewOption("Update Custom Nodes", "update-nodes"),
-									huh.NewOption("Reload ComfyUI on Node Changes", "reload"),
-									huh.NewOption("Select Watched Nodes for Reload", "watch_nodes"),
-									huh.NewOption("Migrate Custom Nodes", "migrate-nodes"),
-									huh.NewOption("Main Menu", "back"),
-								).
-								Value(&subChoice),
-						),
-					).WithTheme(huh.ThemeCharm())
-					_ = form.Run()
-					if subChoice == "back" || subChoice == "" {
-						choice = ""
-						break
-					}
-					choice = subChoice
-				} else if choice == "env_mgmt" {
-					var subChoice string
-					form := huh.NewForm(
-						huh.NewGroup(
-							huh.NewSelect[string]().
-								Title("Environment Management").
-								Options(
-									huh.NewOption("Manage Environments (Lounge/Den/Nook)", "manage_envs"),
-									huh.NewOption("Set Working Environment", "set_working_env"),
-									huh.NewOption("Remove Environment (Disconnects, doesn't delete files)", "remove_env"),
-									huh.NewOption("Install/Reconfigure ComfyUI", "install"),
-									huh.NewOption("Main Menu", "back"),
-								).
-								Value(&subChoice),
-						),
-					).WithTheme(huh.ThemeCharm())
-					_ = form.Run()
-					if subChoice == "back" || subChoice == "" {
-						choice = ""
-						break
-					}
-					choice = subChoice
-				} else if choice == "other_tools" {
-					var subChoice string
-					form := huh.NewForm(
-						huh.NewGroup(
-							huh.NewSelect[string]().
-								Title("Other Tools").
-								Options(
-									huh.NewOption("Sync .env with .env.example", "sync-env"),
-									huh.NewOption("Main Menu", "back"),
-								).
-								Value(&subChoice),
-						),
-					).WithTheme(huh.ThemeCharm())
-					_ = form.Run()
-					if subChoice == "back" || subChoice == "" {
-						choice = ""
-						break
-					}
-					choice = subChoice
-				} else {
-					break // Not a menu, break to process action
-				}
-			}
-
-			// If choice is empty, show main menu again
-			if choice == "" {
-				continue
-			}
-
-			// Process the final actionable choice
-			if !appPaths.IsConfigured && choice != "install" && choice != "exit" && choice != "manage_envs" {
-				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' or set COMFYUI_PATH in %s (located at %s).", envFileName, appPaths.EnvFile)))
-				os.Exit(1)
-			}
-
-			switch choice {
-			case "start_fg":
-				runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, false) })
-			case "start_bg":
-				runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, true) })
-			case "stop":
-				runWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) })
-			case "restart":
-				runWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) })
-			case "update":
-				runWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) })
-			case "install":
-				installComfyUI()
-			case "create_node":
-				createNewNode()
-			case "list_nodes":
-				listCustomNodes()
-			case "delete_node":
-				deleteCustomNode()
-			case "pack_node":
-				packNode()
-			case "reload":
-				watchDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
-				exts := []string{".py", ".js", ".css"}
-				debounce := 5
-				if val := os.Getenv("COMFY_RELOAD_EXTS"); val != "" {
-					exts = strings.Split(val, ",")
-					for i := range exts {
-						exts[i] = strings.TrimSpace(exts[i])
-					}
-				}
-				if val := os.Getenv("COMFY_RELOAD_DEBOUNCE"); val != "" {
-					if d, err := strconv.Atoi(val); err == nil && d > 0 {
-						debounce = d
-					}
-				}
-				// Read includedDirs from .env (COMFY_RELOAD_INCLUDE_DIRS)
-				includedDirs := []string{}
-				if val := os.Getenv("COMFY_RELOAD_INCLUDE_DIRS"); val != "" {
-					for _, d := range strings.Split(val, ",") {
-						trimmed := strings.TrimSpace(d)
-						if trimmed != "" {
-							includedDirs = append(includedDirs, trimmed)
-						}
-					}
-				}
-				reloadComfyUI(watchDir, debounce, exts, includedDirs)
-			case "status":
-				runWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) })
-			case "watch_nodes":
-				customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
-				entries, err := os.ReadDir(customNodesDir)
-				if err != nil {
-					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to read custom_nodes directory: %v", err)))
-					os.Exit(1)
-				}
-				var nodeDirs []string
-				for _, entry := range entries {
-					if entry.IsDir() {
-						nodeDirs = append(nodeDirs, entry.Name())
-					}
-				}
-				if len(nodeDirs) == 0 {
-					fmt.Println(internal.WarningStyle.Render("No custom node directories found to watch."))
-					os.Exit(0)
-				}
-				var selected []string
+			if choice == "main_actions" {
+				var subChoice string
 				form := huh.NewForm(
 					huh.NewGroup(
-						huh.NewMultiSelect[string]().
-							Title("Select custom nodes to actively watch for reload (all others will be excluded):").
-							OptionsFunc(func() []huh.Option[string] {
-								opts := make([]huh.Option[string], 0, len(nodeDirs))
-								for _, d := range nodeDirs {
-									opts = append(opts, huh.NewOption(d, d))
-								}
-								return opts
-							}, nil).
-							Value(&selected),
+						huh.NewSelect[string]().
+							Title("Start/Stop/Restart").
+							Options(
+								huh.NewOption("Start ComfyUI (Foreground)", "start_fg"),
+								huh.NewOption("Start ComfyUI (Background)", "start_bg"),
+								huh.NewOption("Stop ComfyUI", "stop"),
+								huh.NewOption("Restart ComfyUI (Background)", "restart"),
+								huh.NewOption("Update ComfyUI", "update"),
+								huh.NewOption("Install/Reconfigure ComfyUI", "install"),
+								huh.NewOption("Status (ComfyUI)", "status"),
+								huh.NewOption("More Tools", "back"),
+							).
+							Value(&subChoice),
 					),
 				).WithTheme(huh.ThemeCharm())
-				if err := form.Run(); err != nil {
-					if errors.Is(err, huh.ErrUserAborted) {
-						fmt.Println(internal.InfoStyle.Render("Operation cancelled by user."))
-						os.Exit(0)
-					}
-					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Error running form: %v", err)))
-					os.Exit(1)
+				_ = form.Run()
+				if subChoice == "back" || subChoice == "" {
+					choice = ""
+					break
 				}
-				envMap := make(map[string]string)
-				if _, err := os.Stat(internal.ExpandUserPath(appPaths.EnvFile)); err == nil {
-					existingEnv, readErr := godotenv.Read(appPaths.EnvFile)
-					if readErr == nil {
-						for k, v := range existingEnv {
-							envMap[k] = v
-						}
-					}
+				choice = subChoice
+			} else if choice == "node_mgmt" {
+				var subChoice string
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title("Node Management").
+							Options(
+								huh.NewOption("Create New Node", "create_node"),
+								huh.NewOption("List Custom Nodes", "list_nodes"),
+								huh.NewOption("Delete Custom Node", "delete_node"),
+								huh.NewOption("Pack Custom Node", "pack_node"),
+								huh.NewOption("Update Custom Nodes", "update-nodes"),
+								huh.NewOption("Reload ComfyUI on Node Changes", "reload"),
+								huh.NewOption("Select Watched Nodes for Reload", "watch_nodes"),
+								huh.NewOption("Migrate Custom Nodes", "migrate-nodes"),
+								huh.NewOption("Main Menu", "back"),
+							).
+							Value(&subChoice),
+					),
+				).WithTheme(huh.ThemeCharm())
+				_ = form.Run()
+				if subChoice == "back" || subChoice == "" {
+					choice = ""
+					break
 				}
-				envMap["COMFY_RELOAD_INCLUDE_DIRS"] = strings.Join(selected, ",")
-				if err := godotenv.Write(envMap, appPaths.EnvFile); err != nil {
-					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update .env: %v", err)))
-					os.Exit(1)
+				choice = subChoice
+			} else if choice == "env_mgmt" {
+				var subChoice string
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title("Environment Management").
+							Options(
+								huh.NewOption("Manage Environments (Lounge/Den/Nook)", "manage_envs"),
+								huh.NewOption("Set Working Environment", "set_working_env"),
+								huh.NewOption("Remove Environment (Disconnects, doesn't delete files)", "remove_env"),
+								huh.NewOption("Install/Reconfigure ComfyUI", "install"),
+								huh.NewOption("Main Menu", "back"),
+							).
+							Value(&subChoice),
+					),
+				).WithTheme(huh.ThemeCharm())
+				_ = form.Run()
+				if subChoice == "back" || subChoice == "" {
+					choice = ""
+					break
 				}
-				fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Updated .env: COMFY_RELOAD_INCLUDE_DIRS=%s", strings.Join(selected, ","))))
-				os.Exit(0)
-			case "sync-env":
-				err := syncEnvWithExample()
-				if err != nil {
-					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to sync .env: %v", err)))
-					os.Exit(1)
+				choice = subChoice
+			} else if choice == "other_tools" {
+				var subChoice string
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title("Other Tools").
+							Options(
+								huh.NewOption("Sync .env with .env.example", "sync-env"),
+								huh.NewOption("Main Menu", "back"),
+							).
+							Value(&subChoice),
+					),
+				).WithTheme(huh.ThemeCharm())
+				_ = form.Run()
+				if subChoice == "back" || subChoice == "" {
+					choice = ""
+					break
 				}
-				os.Exit(0)
-			case "update-nodes":
-				updateCustomNodes()
-			case "manage_envs":
-				manageBrandedEnvironments()
-			case "set_working_env":
-				cfg, _ := internal.LoadGlobalConfig()
-				if len(cfg.Installs) == 0 {
-					fmt.Println(internal.WarningStyle.Render("No environments configured. Use 'Manage Environments' to add one."))
-					return
-				}
-				var envOptions []huh.Option[string]
-				for _, inst := range cfg.Installs {
-					label := string(inst.Type)
-					if inst.IsDefault {
-						label += " (default)"
-					}
-					if inst.Name != "" && inst.Name != string(inst.Type) {
-						label += " - " + inst.Name
-					}
-					envOptions = append(envOptions, huh.NewOption(label, string(inst.Type)))
-				}
-				var selectedEnv string
-				form2 := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Select working environment:").Options(envOptions...).Value(&selectedEnv))).WithTheme(huh.ThemeCharm())
-				_ = form2.Run()
-				if selectedEnv != "" {
-					inst := cfg.FindInstallByType(internal.InstallType(selectedEnv))
-					if inst != nil {
-						internal.UpdateEnvFile(appPaths.EnvFile, map[string]string{
-							"WORKING_COMFY_ENV": selectedEnv,
-							"COMFYUI_PATH":      inst.Path,
-						})
-						fmt.Println(internal.SuccessStyle.Render("Working environment set to: " + selectedEnv + " (" + inst.Path + ")"))
-					} else {
-						fmt.Println(internal.ErrorStyle.Render("Selected environment not found in config."))
-					}
-				}
-				return
-			case "migrate-nodes":
-				migrateCustomNodes()
-			case "remove_env":
-				removeEnv()
-				os.Exit(0)
-			case "exit":
-				fmt.Println(internal.InfoStyle.Render("Exiting."))
-				os.Exit(0)
-			default:
-				fmt.Println(internal.WarningStyle.Render("Invalid choice."))
+				choice = subChoice
+			} else {
+				break // Not a menu, break to process action
 			}
-			// After action, break or continue as appropriate
-			break
+		}
+
+		// If choice is empty, show main menu again
+		if choice == "" {
+			continue
+		}
+
+		// Process the final actionable choice
+		if !appPaths.IsConfigured && choice != "install" && choice != "exit" && choice != "manage_envs" {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' or set COMFYUI_PATH in %s (located at %s).", envFileName, appPaths.EnvFile)))
+			os.Exit(1)
+		}
+
+		switch choice {
+		case "start_fg":
+			runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, false) })
+		case "start_bg":
+			runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, true) })
+		case "stop":
+			runWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) })
+		case "restart":
+			runWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) })
+		case "update":
+			runWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) })
+		case "install":
+			installComfyUI()
+		case "create_node":
+			createNewNode()
+		case "list_nodes":
+			listCustomNodes()
+		case "delete_node":
+			deleteCustomNode()
+		case "pack_node":
+			packNode()
+		case "reload":
+			watchDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
+			exts := []string{".py", ".js", ".css"}
+			debounce := 5
+			if val := os.Getenv("COMFY_RELOAD_EXTS"); val != "" {
+				exts = strings.Split(val, ",")
+				for i := range exts {
+					exts[i] = strings.TrimSpace(exts[i])
+				}
+			}
+			if val := os.Getenv("COMFY_RELOAD_DEBOUNCE"); val != "" {
+				if d, err := strconv.Atoi(val); err == nil && d > 0 {
+					debounce = d
+				}
+			}
+			// Read includedDirs from .env (COMFY_RELOAD_INCLUDE_DIRS)
+			includedDirs := []string{}
+			if val := os.Getenv("COMFY_RELOAD_INCLUDE_DIRS"); val != "" {
+				for _, d := range strings.Split(val, ",") {
+					trimmed := strings.TrimSpace(d)
+					if trimmed != "" {
+						includedDirs = append(includedDirs, trimmed)
+					}
+				}
+			}
+			reloadComfyUI(watchDir, debounce, exts, includedDirs)
+		case "status":
+			runWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) })
+		case "watch_nodes":
+			customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
+			entries, err := os.ReadDir(customNodesDir)
+			if err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to read custom_nodes directory: %v", err)))
+				os.Exit(1)
+			}
+			var nodeDirs []string
+			for _, entry := range entries {
+				if entry.IsDir() {
+					nodeDirs = append(nodeDirs, entry.Name())
+				}
+			}
+			if len(nodeDirs) == 0 {
+				fmt.Println(internal.WarningStyle.Render("No custom node directories found to watch."))
+				os.Exit(0)
+			}
+			var selected []string
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewMultiSelect[string]().
+						Title("Select custom nodes to actively watch for reload (all others will be excluded):").
+						OptionsFunc(func() []huh.Option[string] {
+							opts := make([]huh.Option[string], 0, len(nodeDirs))
+							for _, d := range nodeDirs {
+								opts = append(opts, huh.NewOption(d, d))
+							}
+							return opts
+						}, nil).
+						Value(&selected),
+				),
+			).WithTheme(huh.ThemeCharm())
+			if err := form.Run(); err != nil {
+				if errors.Is(err, huh.ErrUserAborted) {
+					fmt.Println(internal.InfoStyle.Render("Operation cancelled by user."))
+					os.Exit(0)
+				}
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Error running form: %v", err)))
+				os.Exit(1)
+			}
+			envMap := make(map[string]string)
+			if _, err := os.Stat(internal.ExpandUserPath(appPaths.EnvFile)); err == nil {
+				existingEnv, readErr := godotenv.Read(appPaths.EnvFile)
+				if readErr == nil {
+					for k, v := range existingEnv {
+						envMap[k] = v
+					}
+				}
+			}
+			envMap["COMFY_RELOAD_INCLUDE_DIRS"] = strings.Join(selected, ",")
+			if err := godotenv.Write(envMap, appPaths.EnvFile); err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update .env: %v", err)))
+				os.Exit(1)
+			}
+			fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Updated .env: COMFY_RELOAD_INCLUDE_DIRS=%s", strings.Join(selected, ","))))
+			os.Exit(0)
+		case "sync-env":
+			err := syncEnvWithExample()
+			if err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to sync .env: %v", err)))
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "update-nodes":
+			updateCustomNodes()
+		case "manage_envs":
+			manageBrandedEnvironments()
+		case "set_working_env":
+			cfg, _ := internal.LoadGlobalConfig()
+			if len(cfg.Installs) == 0 {
+				fmt.Println(internal.WarningStyle.Render("No environments configured. Use 'Manage Environments' to add one."))
+				return
+			}
+			var envOptions []huh.Option[string]
+			for _, inst := range cfg.Installs {
+				label := string(inst.Type)
+				if inst.IsDefault {
+					label += " (default)"
+				}
+				if inst.Name != "" && inst.Name != string(inst.Type) {
+					label += " - " + inst.Name
+				}
+				envOptions = append(envOptions, huh.NewOption(label, string(inst.Type)))
+			}
+			var selectedEnv string
+			form2 := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Select working environment:").Options(envOptions...).Value(&selectedEnv))).WithTheme(huh.ThemeCharm())
+			_ = form2.Run()
+			if selectedEnv != "" {
+				inst := cfg.FindInstallByType(internal.InstallType(selectedEnv))
+				if inst != nil {
+					internal.UpdateEnvFile(appPaths.EnvFile, map[string]string{
+						"WORKING_COMFY_ENV": selectedEnv,
+						"COMFYUI_PATH":      inst.Path,
+					})
+					fmt.Println(internal.SuccessStyle.Render("Working environment set to: " + selectedEnv + " (" + inst.Path + ")"))
+				} else {
+					fmt.Println(internal.ErrorStyle.Render("Selected environment not found in config."))
+				}
+			}
+			return
+		case "migrate-nodes":
+			migrateCustomNodes()
+		case "remove_env":
+			removeEnv()
+			os.Exit(0)
+		case "exit":
+			fmt.Println(internal.InfoStyle.Render("Exiting."))
+			os.Exit(0)
+		default:
+			fmt.Println(internal.WarningStyle.Render("Invalid choice."))
 		}
 	}
 }
