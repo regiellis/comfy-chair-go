@@ -1,0 +1,36 @@
+# .goreleaser.yml for comfy-chair-go
+project_name: comfy-chair
+builds:
+  - id: comfy-chair
+    main: .
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+    ldflags: -s -w
+    env:
+      - CGO_ENABLED=0
+archives:
+  - id: default
+    builds:
+      - comfy-chair
+    format: tar.gz
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - .env.example
+      - comfy-installs.json
+      - templates/**/*
+      - demos/**/*
+checksum:
+  name_template: "checksums.txt"
+release:
+  github:
+    owner: regiellis
+    name: comfy-chair-go
+    draft: false
+    prerelease: false
+    token: "{{ .Env.GITHUB_TOKEN }}"

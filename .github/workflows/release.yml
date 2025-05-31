@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build binaries
+    name: Build and Release with GoReleaser
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -18,32 +18,20 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Build all binaries (cross-platform)
-        run: |
-          mkdir -p dist
-          GOOS=linux   GOARCH=amd64 go build -o dist/comfy-chair-linux-amd64   ./...
-          GOOS=darwin  GOARCH=amd64 go build -o dist/comfy-chair-darwin-amd64  ./...
-          GOOS=windows GOARCH=amd64 go build -o dist/comfy-chair-windows-amd64.exe ./...
+      - name: Set up QEMU (for cross-compilation)
+        uses: docker/setup-qemu-action@v3
 
-      - name: Upload binaries
-        uses: actions/upload-artifact@v4
+      - name: Set up GoReleaser
+        uses: goreleaser/goreleaser-action@v5
         with:
-          name: binaries
-          path: dist/*
+          version: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v5
         with:
-          path: dist
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/**/*
+          version: latest
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
