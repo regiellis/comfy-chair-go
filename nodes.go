@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -169,6 +170,44 @@ func createNewNode() {
 		return
 	}
 	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Node '%s' created in %s", nodeName, nodeDir)))
+
+	// Auto-generate minimal example workflow JSON for the new node
+	exampleDir := filepath.Join(nodeDir, "example_workflows")
+	_ = os.MkdirAll(exampleDir, 0755)
+	examplePath := filepath.Join(exampleDir, nodeName+"_example.json")
+	// Minimal workflow: one node, one output, default input values
+	type Workflow struct {
+		Name  string           `json:"name"`
+		Nodes []map[string]any `json:"nodes"`
+		Links [][]any          `json:"links"`
+		Extra map[string]any   `json:"extra,omitempty"`
+	}
+	// Use placeholder/defaults for inputs
+	inputs := map[string]any{
+		"input_text":     "Hello, Comfy!",
+		"input_number":   42,
+		"input_bool":     true,
+		"input_choice":   "option1",
+		"input_optional": "Optional value",
+	}
+	mainNode := map[string]any{
+		"id":      1,
+		"type":    nodeName,
+		"inputs":  inputs,
+		"outputs": map[string]any{"output": 1},
+	}
+	workflow := Workflow{
+		Name:  nodeName + " Example Workflow",
+		Nodes: []map[string]any{mainNode},
+		Links: [][]any{},
+		Extra: map[string]any{"description": "Auto-generated example workflow for node '" + nodeName + "'. Edit as needed."},
+	}
+	if data, err := json.MarshalIndent(workflow, "", "  "); err == nil {
+		_ = os.WriteFile(examplePath, data, 0644)
+		fmt.Println(internal.InfoStyle.Render("Example workflow created at: " + examplePath))
+	} else {
+		fmt.Println(internal.WarningStyle.Render("Failed to create example workflow JSON: " + err.Error()))
+	}
 
 	// Update comfy-installs.json (add node to CustomNodes)
 	cfg, err := internal.LoadGlobalConfig()
@@ -595,5 +634,176 @@ func updateCustomNodes() {
 				fmt.Println(internal.SuccessStyle.Render("pip install succeeded."))
 			}
 		}
+	}
+}
+
+// addOrRemoveNodeWorkflows allows the user to add or remove workflows associated with a custom node to/from the main workflows folder.
+// It keeps track of which workflows were added for each node in a tracking file (e.g., .node_workflows.json).
+func addOrRemoveNodeWorkflows() {
+	fmt.Println(internal.TitleStyle.Render("Add/Remove Custom Node Workflows in Main Workflows Folder"))
+	if !appPaths.IsConfigured {
+		fmt.Println(internal.ErrorStyle.Render("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' first."))
+		return
+	}
+
+	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
+	mainWorkflowsDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "workflows"))
+	trackingFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, ".node_workflows.json"))
+
+	// 1. List custom nodes
+	files, err := os.ReadDir(customNodesDir)
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to read custom nodes directory: %v", err)))
+		return
+	}
+	var nodeNames []string
+	for _, file := range files {
+		if file.IsDir() {
+			nodeNames = append(nodeNames, file.Name())
+		}
+	}
+	if len(nodeNames) == 0 {
+		fmt.Println(internal.InfoStyle.Render("No custom nodes found."))
+		return
+	}
+
+	// 2. Select node
+	var nodeName string
+	options := make([]huh.Option[string], len(nodeNames))
+	for i, name := range nodeNames {
+		options[i] = huh.NewOption(name, name)
+	}
+	selectPrompt := huh.NewSelect[string]().
+		Title("Select a custom node:").
+		Options(options...).
+		Value(&nodeName)
+	if err := selectPrompt.Run(); err != nil || nodeName == "" {
+		fmt.Println(internal.InfoStyle.Render("Operation cancelled."))
+		return
+	}
+
+	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
+	workflowDirs := []string{"example_workflows", "workflows"}
+	var workflowFiles []string
+	var workflowPaths []string
+	for _, dir := range workflowDirs {
+		wfDir := filepath.Join(nodeDir, dir)
+		files, err := os.ReadDir(wfDir)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".json") {
+				workflowFiles = append(workflowFiles, f.Name())
+				workflowPaths = append(workflowPaths, filepath.Join(wfDir, f.Name()))
+			}
+		}
+	}
+	if len(workflowFiles) == 0 {
+		fmt.Println(internal.InfoStyle.Render("No workflows found in node's workflow directories."))
+		return
+	}
+
+	// 3. Add or Remove?
+	var action string
+	formAction := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().
+			Title("Would you like to add or remove workflows for this node?").
+			Options(
+				huh.NewOption("Add to main workflows", "add"),
+				huh.NewOption("Remove from main workflows", "remove"),
+			).
+			Value(&action),
+	)).WithTheme(huh.ThemeCharm())
+	if err := formAction.Run(); err != nil || action == "" {
+		fmt.Println(internal.InfoStyle.Render("Operation cancelled."))
+		return
+	}
+
+	// 4. Select workflows
+	var selected []string
+	formWf := huh.NewForm(huh.NewGroup(
+		huh.NewMultiSelect[string]().
+			Title("Select workflows:").
+			OptionsFunc(func() []huh.Option[string] {
+				opts := make([]huh.Option[string], len(workflowFiles))
+				for i, n := range workflowFiles {
+					opts[i] = huh.NewOption(n, n)
+				}
+				return opts
+			}, nil).
+			Value(&selected),
+	)).WithTheme(huh.ThemeCharm())
+	if err := formWf.Run(); err != nil || len(selected) == 0 {
+		fmt.Println(internal.InfoStyle.Render("No workflows selected. Operation cancelled."))
+		return
+	}
+
+	// 5. Load or create tracking file
+	type nodeWorkflowMap map[string][]string
+	var tracking nodeWorkflowMap
+	{
+		data, err := os.ReadFile(trackingFile)
+		if err == nil {
+			_ = json.Unmarshal(data, &tracking)
+		} else {
+			tracking = make(nodeWorkflowMap)
+		}
+	}
+
+	// 6. Add or Remove workflows
+	if action == "add" {
+		added := []string{}
+		for i, wf := range workflowFiles {
+			for _, sel := range selected {
+				if wf == sel {
+					src := workflowPaths[i]
+					dst := filepath.Join(mainWorkflowsDir, nodeName+"__"+wf)
+					input, err := os.ReadFile(src)
+					if err != nil {
+						fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to read %s: %v", src, err)))
+						continue
+					}
+					if err := os.WriteFile(dst, input, 0644); err != nil {
+						fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to write %s: %v", dst, err)))
+						continue
+					}
+					added = append(added, dst)
+				}
+			}
+		}
+		tracking[nodeName] = append(tracking[nodeName], selected...)
+		data, _ := json.MarshalIndent(tracking, "", "  ")
+		_ = os.WriteFile(trackingFile, data, 0644)
+		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Added workflows to main workflows folder: %v", added)))
+	} else if action == "remove" {
+		removed := []string{}
+		for _, wf := range selected {
+			filename := nodeName + "__" + wf
+			path := filepath.Join(mainWorkflowsDir, filename)
+			if err := os.Remove(path); err == nil {
+				removed = append(removed, filename)
+			}
+		}
+		// Remove from tracking
+		if wfs, ok := tracking[nodeName]; ok {
+			newWfs := []string{}
+			for _, wf := range wfs {
+				found := false
+				for _, sel := range selected {
+					if wf == sel {
+						found = true
+						break
+					}
+				}
+				if !found {
+					newWfs = append(newWfs, wf)
+				}
+			}
+			tracking[nodeName] = newWfs
+			data, _ := json.MarshalIndent(tracking, "", "  ")
+			_ = os.WriteFile(trackingFile, data, 0644)
+		}
+		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Removed workflows from main workflows folder: %v", removed)))
 	}
 }
