@@ -1760,8 +1760,8 @@ func migrateWorkflows() {
 	}
 
 	// 2. List workflow JSON files in source env
-	srcWorkflowsDir := internal.ExpandUserPath(filepath.Join(src.Path, "workflows"))
-	dstWorkflowsDir := internal.ExpandUserPath(filepath.Join(dst.Path, "workflows"))
+	srcWorkflowsDir := internal.ExpandUserPath(filepath.Join(src.Path, "user", "default", "workflows")) //user/default/workflows
+	dstWorkflowsDir := internal.ExpandUserPath(filepath.Join(dst.Path, "user", "default", "workflows"))
 	files, err := os.ReadDir(srcWorkflowsDir)
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render("Failed to read source workflows directory: " + err.Error()))
