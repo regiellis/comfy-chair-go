@@ -1079,6 +1079,8 @@ func printUsage() {
 	fmt.Println("  watch_nodes                       Custom nodes to watch (all others excluded)")
 	fmt.Println("  sync-env                          Sync .env with .env.example")
 	fmt.Println("  migrate-nodes                     Migrate custom nodes between environments")
+	fmt.Println("  migrate-workflows                 Migrate workflows from one envioment to another")
+	fmt.Println("  migrate-images					 Migrate images/videos/audio from one environment to another")
 	fmt.Println("  remove_env                        Remove (disconnect) an environment from config")
 	fmt.Println("  help, --help, -h                  Show this help message")
 }
@@ -1156,6 +1158,12 @@ func main() {
 			return
 		case "migrate-nodes":
 			migrateCustomNodes()
+			return
+		case "migrate-workflows":
+			migrateWorkflows()
+			return
+		case "migrate-images":
+			migrateInputImages()
 			return
 		case "remove_env":
 			removeEnv()
@@ -1235,6 +1243,8 @@ func main() {
 								huh.NewOption("Reload ComfyUI on Node Changes", "reload"),
 								huh.NewOption("Select Watched Nodes for Reload", "watch_nodes"),
 								huh.NewOption("Migrate Custom Nodes", "migrate-nodes"),
+								huh.NewOption("Migrate Input Images/Media", "migrate-images"),
+								huh.NewOption("Migrate Node Workflows", "migrate-workflows"),
 								huh.NewOption("Migrate Workflows", "migrate-workflows"),
 								huh.NewOption("Add/Remove Node Workflows in Main Workflows Folder", "node_workflows"),
 								huh.NewOption("Main Menu", "back"),
@@ -1458,6 +1468,8 @@ func main() {
 			migrateCustomNodes()
 		case "migrate-workflows":
 			migrateWorkflows()
+		case "migrate-images":
+			migrateInputImages()
 		case "remove_env":
 			removeEnv()
 			os.Exit(0)
@@ -1722,6 +1734,205 @@ func manageBrandedEnvironments() {
 	}
 }
 
+// migrateInputImages allows the user to copy input images between environments. from  "input"
+// it will have to copy common images, video, and audio extensions, plus recursive directories.
+func migrateInputImages() {
+	fmt.Println(internal.TitleStyle.Render("Migrate Input Images Between Environments"))
+	cfg, err := internal.LoadGlobalConfig()
+	if err != nil || len(cfg.Installs) < 2 {
+		fmt.Println(internal.ErrorStyle.Render("At least two environments must be configured to migrate input images."))
+		return
+	}
+
+	// --- DESIGN WARNING ---
+	fmt.Println(internal.WarningStyle.Render("Only the first 50 files/folders and one level deep are shown for migration. This is a design choice to avoid overwhelming the interface. If you need to migrate a deeper or specific path, use the custom path option (relative to the input directory)."))
+
+	// Supported extensions
+	exts := []string{".jpg", ".jpeg", ".png", ".gif", ".mp4", ".webm", ".wav", ".mp3"}
+	isMedia := func(name string) bool {
+		lower := strings.ToLower(name)
+		for _, ext := range exts {
+			if strings.HasSuffix(lower, ext) {
+				return true
+			}
+		}
+		return false
+	}
+
+	type Entry struct {
+		Display string // e.g. "folder/file.jpg" or "folder/"
+		Path    string // relative to srcInputDir
+		IsDir   bool
+	}
+	// 1. Prompt for source and target environments
+	envOptions := []huh.Option[string]{}
+	for _, inst := range cfg.Installs {
+		label := string(inst.Type)
+		if inst.Name != "" && inst.Name != string(inst.Type) {
+			label += " - " + inst.Name
+		}
+		envOptions = append(envOptions, huh.NewOption(label, string(inst.Type)))
+	}
+	var srcEnvType, dstEnvType string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().Title("Select source environment:").Options(envOptions...).Value(&srcEnvType),
+			huh.NewSelect[string]().Title("Select target environment:").Options(envOptions...).Value(&dstEnvType),
+		),
+	).WithTheme(huh.ThemeCharm())
+	_ = form.Run()
+	if srcEnvType == dstEnvType || srcEnvType == "" || dstEnvType == "" {
+		fmt.Println(internal.InfoStyle.Render("Migration cancelled (invalid selection)."))
+		return
+	}
+	src := cfg.FindInstallByType(internal.InstallType(srcEnvType))
+	dst := cfg.FindInstallByType(internal.InstallType(dstEnvType))
+	if src == nil || dst == nil {
+		fmt.Println(internal.ErrorStyle.Render("Invalid environment selection."))
+		return
+	}
+
+	srcInputDir := internal.ExpandUserPath(filepath.Join(src.Path, "input"))
+	dstInputDir := internal.ExpandUserPath(filepath.Join(dst.Path, "input"))
+
+	entries := make([]Entry, 0, 50)
+	files, err := os.ReadDir(srcInputDir)
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render("Failed to read source input directory: " + err.Error()))
+		return
+	}
+	count := 0
+	for _, f := range files {
+		if count >= 50 {
+			break
+		}
+		if f.IsDir() {
+			entries = append(entries, Entry{Display: f.Name() + string(os.PathSeparator), Path: f.Name(), IsDir: true})
+		} else if isMedia(f.Name()) {
+			entries = append(entries, Entry{Display: f.Name(), Path: f.Name(), IsDir: false})
+		}
+		count++
+	}
+	customPathOption := "[Custom path...]"
+	entries = append(entries, Entry{Display: customPathOption, Path: "__CUSTOM__", IsDir: false})
+
+	allOption := "ALL (select all files and folders)"
+	var selected []string
+	form2 := huh.NewForm(huh.NewGroup(
+		huh.NewMultiSelect[string]().
+			Title("Select input files or folders to migrate:").
+			OptionsFunc(func() []huh.Option[string] {
+				opts := make([]huh.Option[string], 0, len(entries)+1)
+				opts = append(opts, huh.NewOption(allOption, allOption))
+				for _, e := range entries {
+					opts = append(opts, huh.NewOption(e.Display, e.Path))
+				}
+				return opts
+			}, nil).
+			Value(&selected),
+	)).WithTheme(huh.ThemeCharm())
+	_ = form2.Run()
+	if len(selected) == 0 {
+		fmt.Println(internal.InfoStyle.Render("No files or folders selected. Migration cancelled."))
+		return
+	}
+
+	pathsToCopy := map[string]struct{}{}
+	foldersToCopy := map[string]struct{}{}
+	results := []string{}
+	// Expand selection
+	if len(selected) == 1 && selected[0] == allOption {
+		for _, e := range entries {
+			if e.IsDir {
+				foldersToCopy[e.Path] = struct{}{}
+			} else {
+				pathsToCopy[e.Path] = struct{}{}
+			}
+		}
+	} else {
+		for _, sel := range selected {
+			for _, e := range entries {
+				if sel == e.Path {
+					if e.IsDir {
+						foldersToCopy[e.Path] = struct{}{}
+					} else {
+						pathsToCopy[e.Path] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
+	for relPath := range pathsToCopy {
+		srcPath := filepath.Join(srcInputDir, relPath)
+		dstPath := filepath.Join(dstInputDir, relPath)
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			results = append(results, fmt.Sprintf("%s: %s", relPath, internal.ErrorStyle.Render("Failed to create directory")))
+			continue
+		}
+		input, err := os.ReadFile(srcPath)
+		if err != nil {
+			results = append(results, fmt.Sprintf("%s: %s", relPath, internal.ErrorStyle.Render("Failed to read")))
+			continue
+		}
+		if err := os.WriteFile(dstPath, input, 0644); err != nil {
+			results = append(results, fmt.Sprintf("%s: %s", relPath, internal.ErrorStyle.Render("Failed to write")))
+			continue
+		}
+		results = append(results, fmt.Sprintf("%s: %s", relPath, internal.SuccessStyle.Render("Copied")))
+	}
+	for relPath := range foldersToCopy {
+		srcPath := filepath.Join(srcInputDir, relPath)
+		dstPath := filepath.Join(dstInputDir, relPath)
+		if err := copyDir(srcPath, dstPath); err != nil {
+			results = append(results, fmt.Sprintf("%s: %s", relPath, internal.ErrorStyle.Render("Failed to copy folder")))
+			continue
+		}
+		results = append(results, fmt.Sprintf("%s: %s", relPath, internal.SuccessStyle.Render("Folder copied")))
+	}
+
+	// 6. Summary
+	fmt.Println(internal.TitleStyle.Render("\nInput File Migration Summary:"))
+	for _, r := range results {
+		fmt.Println("  " + r)
+	}
+}
+
+// copyDir recursively copies a directory tree from src to dst.
+func copyDir(src string, dst string) error {
+	src = internal.ExpandUserPath(src)
+	dst = internal.ExpandUserPath(dst)
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // migrateWorkflows allows the user to copy workflow JSON files between environments.
 func migrateWorkflows() {
 	fmt.Println(internal.TitleStyle.Render("Migrate Workflows Between Environments"))
@@ -1759,62 +1970,118 @@ func migrateWorkflows() {
 		return
 	}
 
-	// 2. List workflow JSON files in source env
-	srcWorkflowsDir := internal.ExpandUserPath(filepath.Join(src.Path, "user", "default", "workflows")) //user/default/workflows
+	// 2. Recursively list workflow files and folders in source env
+	srcWorkflowsDir := internal.ExpandUserPath(filepath.Join(src.Path, "user", "default", "workflows"))
 	dstWorkflowsDir := internal.ExpandUserPath(filepath.Join(dst.Path, "user", "default", "workflows"))
-	files, err := os.ReadDir(srcWorkflowsDir)
+
+	type Entry struct {
+		Display string // e.g. "folder/file.json" or "folder/"
+		Path    string // relative to srcWorkflowsDir
+		IsDir   bool
+	}
+	var entries []Entry
+
+	err = filepath.Walk(srcWorkflowsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip errors
+		}
+		rel, _ := filepath.Rel(srcWorkflowsDir, path)
+		if rel == "." {
+			return nil
+		}
+		if info.IsDir() {
+			entries = append(entries, Entry{Display: rel + string(os.PathSeparator), Path: rel, IsDir: true})
+		} else if strings.HasSuffix(info.Name(), ".json") {
+			entries = append(entries, Entry{Display: rel, Path: rel, IsDir: false})
+		}
+		return nil
+	})
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render("Failed to read source workflows directory: " + err.Error()))
 		return
 	}
-	var workflowFiles []string
-	for _, f := range files {
-		if !f.IsDir() && strings.HasSuffix(f.Name(), ".json") {
-			workflowFiles = append(workflowFiles, f.Name())
-		}
-	}
-	if len(workflowFiles) == 0 {
-		fmt.Println(internal.InfoStyle.Render("No workflow JSON files found in source environment."))
+	if len(entries) == 0 {
+		fmt.Println(internal.InfoStyle.Render("No workflow files or folders found in source environment."))
 		return
 	}
+
+	// 3. Prompt for selection (allow selecting files and folders, plus "ALL")
+	allOption := "ALL (select all files and folders)"
 	var selected []string
 	form2 := huh.NewForm(huh.NewGroup(
-		huh.NewMultiSelect[string]().Title("Select workflows to migrate:").OptionsFunc(func() []huh.Option[string] {
-			opts := make([]huh.Option[string], len(workflowFiles))
-			for i, n := range workflowFiles {
-				opts[i] = huh.NewOption(n, n)
-			}
-			return opts
-		}, nil).Value(&selected),
+		huh.NewMultiSelect[string]().
+			Title("Select workflows or folders to migrate:").
+			OptionsFunc(func() []huh.Option[string] {
+				opts := make([]huh.Option[string], 0, len(entries)+1)
+				opts = append(opts, huh.NewOption(allOption, allOption))
+				for _, e := range entries {
+					opts = append(opts, huh.NewOption(e.Display, e.Path))
+				}
+				return opts
+			}, nil).
+			Value(&selected),
 	)).WithTheme(huh.ThemeCharm())
 	_ = form2.Run()
 	if len(selected) == 0 {
-		fmt.Println(internal.InfoStyle.Render("No workflows selected. Migration cancelled."))
+		fmt.Println(internal.InfoStyle.Render("No workflows or folders selected. Migration cancelled."))
 		return
 	}
 
-	// 3. Copy selected workflows
-	if err := os.MkdirAll(dstWorkflowsDir, 0755); err != nil {
-		fmt.Println(internal.ErrorStyle.Render("Failed to create target workflows directory: " + err.Error()))
+	// 4. Resolve selection (expand folders, handle ALL)
+	pathsToCopy := map[string]struct{}{}
+	if len(selected) == 1 && selected[0] == allOption {
+		// Select all files (not folders)
+		for _, e := range entries {
+			if !e.IsDir {
+				pathsToCopy[e.Path] = struct{}{}
+			}
+		}
+	} else {
+		for _, sel := range selected {
+			// If folder, add all files under it
+			for _, e := range entries {
+				if !e.IsDir {
+					if sel == e.Path || (strings.HasSuffix(sel, string(os.PathSeparator)) && strings.HasPrefix(e.Path, sel)) {
+						pathsToCopy[e.Path] = struct{}{}
+					}
+				}
+			}
+			// If file, add directly
+			for _, e := range entries {
+				if !e.IsDir && sel == e.Path {
+					pathsToCopy[e.Path] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(pathsToCopy) == 0 {
+		fmt.Println(internal.InfoStyle.Render("No workflow files selected for migration."))
 		return
 	}
+
+	// 5. Copy selected workflows, preserving folder structure
 	var results []string
-	for _, wf := range selected {
-		srcPath := filepath.Join(srcWorkflowsDir, wf)
-		dstPath := filepath.Join(dstWorkflowsDir, wf)
+	for relPath := range pathsToCopy {
+		srcPath := filepath.Join(srcWorkflowsDir, relPath)
+		dstPath := filepath.Join(dstWorkflowsDir, relPath)
+		// Ensure destination directory exists
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			results = append(results, fmt.Sprintf("%s: %s", relPath, internal.ErrorStyle.Render("Failed to create directory")))
+			continue
+		}
 		input, err := os.ReadFile(srcPath)
 		if err != nil {
-			results = append(results, fmt.Sprintf("%s: %s", wf, internal.ErrorStyle.Render("Failed to read")))
+			results = append(results, fmt.Sprintf("%s: %s", relPath, internal.ErrorStyle.Render("Failed to read")))
 			continue
 		}
 		if err := os.WriteFile(dstPath, input, 0644); err != nil {
-			results = append(results, fmt.Sprintf("%s: %s", wf, internal.ErrorStyle.Render("Failed to write")))
+			results = append(results, fmt.Sprintf("%s: %s", relPath, internal.ErrorStyle.Render("Failed to write")))
 			continue
 		}
-		results = append(results, fmt.Sprintf("%s: %s", wf, internal.SuccessStyle.Render("Copied")))
+		results = append(results, fmt.Sprintf("%s: %s", relPath, internal.SuccessStyle.Render("Copied")))
 	}
 
-	// 4. Summary
+	// 6. Summary
 	fmt.Println(internal.TitleStyle.Render("\nWorkflow Migration Summary:"))
 	for _, r := range results {
 		fmt.Println("  " + r)
