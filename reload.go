@@ -193,6 +193,8 @@ func restartComfyUIProcess() {
 			} else {
 				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) stopped gracefully.", pid)))
 			}
+			// Wait for ComfyUI to fully stop before continuing
+			waitForComfyUIStop(pid)
 		} else {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Could not find process to kill (PID: %d): %v", pid, err)))
 		}
