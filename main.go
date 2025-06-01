@@ -1235,6 +1235,8 @@ func main() {
 								huh.NewOption("Reload ComfyUI on Node Changes", "reload"),
 								huh.NewOption("Select Watched Nodes for Reload", "watch_nodes"),
 								huh.NewOption("Migrate Custom Nodes", "migrate-nodes"),
+								huh.NewOption("Migrate Workflows", "migrate-workflows"),
+								huh.NewOption("Add/Remove Node Workflows in Main Workflows Folder", "node_workflows"),
 								huh.NewOption("Main Menu", "back"),
 							).
 							Value(&subChoice),
@@ -1454,6 +1456,8 @@ func main() {
 			return
 		case "migrate-nodes":
 			migrateCustomNodes()
+		case "migrate-workflows":
+			migrateWorkflows()
 		case "remove_env":
 			removeEnv()
 			os.Exit(0)
@@ -1541,38 +1545,113 @@ func waitForComfyUIStop(pid int) error {
 	}
 }
 
+// runWithEnvConfirmation prompts for environment confirmation and runs the given action with the selected environment.
+func runWithEnvConfirmation(action string, fn func(inst *internal.ComfyInstall)) {
+	cfg, err := internal.LoadGlobalConfig()
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render("Failed to load global config: " + err.Error()))
+		return
+	}
+	inst := cfg.FindDefaultInstall()
+	if len(cfg.Installs) > 1 {
+		var envOptions []huh.Option[string]
+		for _, i := range cfg.Installs {
+			label := string(i.Type)
+			if i.Name != "" && i.Name != string(i.Type) {
+				label += " - " + i.Name
+			}
+			if i.IsDefault {
+				label += " (default)"
+			}
+			envOptions = append(envOptions, huh.NewOption(label, string(i.Type)))
+		}
+		var selected string
+		form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Select environment for '" + action + "':").Options(envOptions...).Value(&selected))).WithTheme(huh.ThemeCharm())
+		_ = form.Run()
+		if selected != "" {
+
+			inst = cfg.FindInstallByType(internal.InstallType(selected))
+		}
+	}
+	if inst == nil {
+		fmt.Println(internal.ErrorStyle.Render("No environment selected or found."))
+		return
+	}
+	fn(inst)
+}
+
+// startComfyUIWithEnv starts ComfyUI for the given environment, foreground/background.
+func startComfyUIWithEnv(inst *internal.ComfyInstall, background bool) {
+	oldDir := appPaths.ComfyUIDir
+	appPaths.ComfyUIDir = inst.Path
+	defer func() { appPaths.ComfyUIDir = oldDir }()
+	startComfyUI(background)
+}
+
+// updateComfyUIWithEnv updates ComfyUI for the given environment.
+func updateComfyUIWithEnv(inst *internal.ComfyInstall) {
+	oldDir := appPaths.ComfyUIDir
+	appPaths.ComfyUIDir = inst.Path
+	defer func() { appPaths.ComfyUIDir = oldDir }()
+	updateComfyUI()
+}
+
+// stopComfyUIWithEnv stops ComfyUI for the given environment.
+func stopComfyUIWithEnv(inst *internal.ComfyInstall) {
+	oldDir := appPaths.ComfyUIDir
+	appPaths.ComfyUIDir = inst.Path
+	defer func() { appPaths.ComfyUIDir = oldDir }()
+	// You may want to implement a stopComfyUI() if not present
+	if pid, isRunning := getRunningPID(); isRunning {
+		process, err := os.FindProcess(pid)
+		if err == nil {
+			if runtime.GOOS == "windows" {
+				process.Kill()
+			} else {
+				process.Signal(syscall.SIGTERM)
+			}
+			fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Stopped ComfyUI (PID: %d)", pid)))
+			cleanupPIDFile()
+		} else {
+			fmt.Println(internal.ErrorStyle.Render("Could not find process to stop."))
+		}
+	} else {
+		fmt.Println(internal.InfoStyle.Render("ComfyUI is not running."))
+	}
+}
+
+// restartComfyUIWithEnv restarts ComfyUI for the given environment (background mode).
+func restartComfyUIWithEnv(inst *internal.ComfyInstall) {
+	stopComfyUIWithEnv(inst)
+	startComfyUIWithEnv(inst, true)
+}
+
+// statusComfyUIWithEnv shows status for the given environment.
+func statusComfyUIWithEnv(inst *internal.ComfyInstall) {
+	oldDir := appPaths.ComfyUIDir
+	appPaths.ComfyUIDir = inst.Path
+	defer func() { appPaths.ComfyUIDir = oldDir }()
+	// You may want to implement a statusComfyUI() if not present
+	if pid, isRunning := getRunningPID(); isRunning {
+		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("ComfyUI is running (PID: %d)", pid)))
+	} else {
+		fmt.Println(internal.InfoStyle.Render("ComfyUI is not running."))
+	}
+}
+
 // manageBrandedEnvironments allows the user to manage branded environments (Lounge, Den, Nook).
 func manageBrandedEnvironments() {
-	cfg, _ := internal.LoadGlobalConfig()
+	cfg, err := internal.LoadGlobalConfig()
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render("Failed to load global config: " + err.Error()))
+		return
+	}
 	labels := map[internal.InstallType]string{
 		internal.LoungeInstall: "Lounge (Main/Stable)",
 		internal.DenInstall:    "Den (Dev/Alternate)",
 		internal.NookInstall:   "Nook (Experimental/Test)",
 	}
-
 	for {
-		if len(cfg.Installs) == 0 {
-			fmt.Println(internal.WarningStyle.Render("No environments configured. Please add a new environment."))
-			var which string
-			form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Add which environment?").Options(
-				huh.NewOption("Lounge (Main/Stable)", string(internal.LoungeInstall)),
-				huh.NewOption("Den (Dev/Alternate)", string(internal.DenInstall)),
-				huh.NewOption("Nook (Experimental/Test)", string(internal.NookInstall)),
-			).Value(&which))).WithTheme(huh.ThemeCharm())
-			_ = form.Run()
-			var path string
-			form2 := huh.NewForm(huh.NewGroup(huh.NewInput().Title(fmt.Sprintf("Enter path for %s", labels[internal.InstallType(which)])).Value(&path))).WithTheme(huh.ThemeCharm())
-			_ = form2.Run()
-			if path != "" {
-				cfg.AddOrUpdateInstall(internal.ComfyInstall{Name: which, Type: internal.InstallType(which), Path: path, IsDefault: true})
-				internal.SaveGlobalConfig(cfg)
-				fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("%s environment added and set as default.", labels[internal.InstallType(which)])))
-				continue // Show the menu again with the new env
-			} else {
-				fmt.Println(internal.WarningStyle.Render("No path entered. Aborting environment add."))
-				return
-			}
-		}
 		var selectedEnv string
 		form := huh.NewForm(
 			huh.NewGroup(
@@ -1597,27 +1676,24 @@ func manageBrandedEnvironments() {
 		envType := internal.InstallType(selectedEnv)
 		inst := cfg.FindInstallByType(envType)
 		if inst == nil {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("No environment configured for %s.", labels[envType])))
+			fmt.Println(internal.WarningStyle.Render("No install found for this environment. You can add it by running 'Install/Reconfigure ComfyUI'."))
 			return
 		}
-		// Check venv for this environment
-		if err := checkVenvPython(inst.Path); err != nil {
-			fmt.Println(internal.WarningStyle.Render(err.Error()))
-		}
 		var action string
-		form = huh.NewForm(
+		form2 := huh.NewForm(
 			huh.NewGroup(
 				huh.NewSelect[string]().
-					Title(fmt.Sprintf("Manage %s", labels[envType])).
+					Title(fmt.Sprintf("Manage %s:", labels[envType])).
 					Options(
 						huh.NewOption("Set as Default", "set_default"),
 						huh.NewOption("Update", "update"),
-						huh.NewOption("Remove", "remove"),
+						huh.NewOption("Remove (Disconnect)", "remove"),
+						huh.NewOption("Back", "back"),
 					).
 					Value(&action),
 			),
 		).WithTheme(huh.ThemeCharm())
-		if err := form.Run(); err != nil {
+		if err := form2.Run(); err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {
 				fmt.Println(internal.InfoStyle.Render("Operation cancelled by user."))
 				return
@@ -1636,425 +1712,22 @@ func manageBrandedEnvironments() {
 			}
 			fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("%s set as default environment.", labels[envType])))
 		case "update":
-			updateComfyUI()
+			updateComfyUIWithEnv(inst)
 		case "remove":
-			removeEnvironment(inst)
+			removeEnv()
+			return
+		case "back":
 			return
 		}
 	}
 }
 
-// syncEnvWithExample merges missing keys from .env.example into .env without overwriting user values.
-func syncEnvWithExample() error {
-	examplePath := internal.ExpandUserPath(filepath.Join(appPaths.CliDir, ".env.example"))
-	envPath := internal.ExpandUserPath(filepath.Join(appPaths.CliDir, ".env"))
-	exampleVars, err := internal.ReadEnvFile(examplePath)
-	if err != nil {
-		return fmt.Errorf("failed to read .env.example: %w", err)
-	}
-	userVars, _ := internal.ReadEnvFile(envPath)
-	changed := false
-	for k, v := range exampleVars {
-		if _, ok := userVars[k]; !ok {
-			userVars[k] = v
-			changed = true
-		}
-	}
-	if changed {
-		if err := internal.WriteEnvFile(envPath, userVars); err != nil {
-			return fmt.Errorf("failed to write .env: %w", err)
-		}
-		fmt.Println(internal.SuccessStyle.Render(".env updated with new keys from .env.example."))
-	} else {
-		fmt.Println(internal.InfoStyle.Render(".env already contains all keys from .env.example."))
-	}
-	return nil
-}
-
-// Helper: prompt for environment if not specified, or use working env
-func selectEnvOrDefault(prompt string) (*internal.ComfyInstall, error) {
-	cfg, _ := internal.LoadGlobalConfig()
-	if len(cfg.Installs) == 0 {
-		return nil, fmt.Errorf("no environments configured")
-	}
-	var envOptions []huh.Option[string]
-	for _, inst := range cfg.Installs {
-		label := string(inst.Type)
-		if inst.IsDefault {
-			label += " (default)"
-		}
-		if inst.Name != "" && inst.Name != string(inst.Type) {
-			label += " - " + inst.Name
-		}
-		envOptions = append(envOptions, huh.NewOption(label, string(inst.Type)))
-	}
-	var selectedEnv string
-	form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title(prompt).Options(envOptions...).Value(&selectedEnv))).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
-	if selectedEnv != "" {
-		cfg, _ := internal.LoadGlobalConfig()
-		return cfg.FindInstallByType(internal.InstallType(selectedEnv)), nil
-	}
-	return getActiveComfyInstall()
-}
-
-// Wrap command execution with confirmation and env selection
-func runWithEnvConfirmation(cmdName string, action func(*internal.ComfyInstall)) {
-	inst, err := selectEnvOrDefault(fmt.Sprintf("Select environment for '%s' command:", cmdName))
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(err.Error()))
-		return
-	}
-	icon := ""
-	switch inst.Type {
-	case internal.LoungeInstall:
-		icon = "★"
-	case internal.DenInstall:
-		icon = "✦"
-	case internal.NookInstall:
-		icon = "✧"
-	default:
-		icon = "•"
-	}
-	color := internal.TitleStyle
-	if inst.Type == internal.LoungeInstall {
-		color = internal.WarningStyle
-	}
-	// Use a simple upper-case for the first letter instead of strings.Title (deprecated)
-	typeLabel := string(inst.Type)
-	if len(typeLabel) > 0 {
-		typeLabel = strings.ToUpper(typeLabel[:1]) + typeLabel[1:]
-	}
-	fmt.Println(color.Render(fmt.Sprintf("%s %s: %s", icon, typeLabel, inst.Path)))
-	if inst.Type == internal.LoungeInstall && (cmdName == "update" || cmdName == "replace" || cmdName == "delete") {
-		var confirm bool
-		form := huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("You are about to perform a potentially destructive action on Lounge (source of truth). Are you sure?").Value(&confirm))).WithTheme(huh.ThemeCharm())
-		_ = form.Run()
-		if !confirm {
-			fmt.Println(internal.InfoStyle.Render("Action cancelled."))
-			return
-		}
-	}
-	action(inst)
-}
-
-func startComfyUIWithEnv(inst *internal.ComfyInstall, background bool) {
-	comfyDir := inst.Path
-	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(comfyDir))
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Python executable not found in 'venv' or '.venv' under %s. Please ensure ComfyUI is installed correctly and the venv is set up (via the 'Install' option).", comfyDir)))
-		return
-	}
-	logFile := appPaths.LogFile
-	pidFile := internal.ExpandUserPath(filepath.Join(comfyDir, "comfyui.pid"))
-
-	action := "foreground"
-	if background {
-		action = "background"
-	}
-	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Starting ComfyUI from %s in the %s...", comfyDir, action)))
-
-	if pid, isRunning := getRunningPIDForEnv(pidFile); isRunning {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("ComfyUI is already running (PID: %d).", pid)))
-		return
-	}
-
-	// Port conflict detection and prompt
-	defaultPort := 8188
-	chosenPort, err := internal.PromptForPortConflict(defaultPort)
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Could not start ComfyUI: %v", err)))
-		return
-	}
-
-	args := []string{"-s", internal.ExpandUserPath(filepath.Join(comfyDir, "main.py")), "--listen", "--port", fmt.Sprintf("%d", chosenPort), "--preview-method", "auto", "--front-end-version", "Comfy-Org/ComfyUI_frontend@latest"}
-	process, err := executeCommand(venvPython, args, comfyDir, logFile, background)
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to start ComfyUI: %v", err)))
-		return
-	}
-	if background && process != nil {
-		err := writePIDForEnv(process.Pid, pidFile)
-		if err != nil {
-			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to write PID file: %v", err)))
-			process.Kill()
-			return
-		}
-		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("ComfyUI started in background. PID: %d. Log: %s", process.Pid, logFile)))
-		if err := waitForComfyUIReady(); err != nil {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("ComfyUI might not be fully operational: %v", err)))
-		}
-	} else if !background {
-		fmt.Println(internal.SuccessStyle.Render("ComfyUI started in foreground. Press Ctrl+C to stop."))
-	}
-}
-
-func stopComfyUIWithEnv(inst *internal.ComfyInstall) {
-	pidFile := internal.ExpandUserPath(filepath.Join(inst.Path, "comfyui.pid"))
-	pid, isRunning := getRunningPIDForEnv(pidFile)
-
-	if !isRunning {
-		if pid != 0 {
-			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Found stale PID file for PID %d (process not running). Removing PID file: %s", pid, pidFile)))
-			os.Remove(internal.ExpandUserPath(pidFile))
-		} else {
-			fmt.Println(internal.InfoStyle.Render("ComfyUI is not running in the background (or PID file not found/readable)."))
-		}
-		return
-	}
-
-	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Stopping ComfyUI (PID: %d)...", pid)))
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to find process with PID %d, though it was reported as running: %v", pid, err)))
-		os.Remove(internal.ExpandUserPath(pidFile))
-		return
-	}
-	var killErr error
-	if runtime.GOOS == "windows" {
-		killErr = process.Kill()
-	} else {
-		killErr = process.Signal(syscall.SIGTERM)
-	}
-	if killErr != nil {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to send termination signal to PID %d: %v. It might have already exited.", pid, killErr)))
-		if !isProcessRunning(pid) {
-			os.Remove(internal.ExpandUserPath(pidFile))
-		}
-		return
-	}
-	if err := waitForComfyUIStop(pid); err != nil {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) did not stop gracefully: %v. Forcing stop.", pid, err)))
-		if forceKillErr := process.Kill(); forceKillErr != nil {
-			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to force kill PID %d: %v", pid, forceKillErr)))
-		} else {
-			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) force killed.", pid)))
-		}
-	} else {
-		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("ComfyUI (PID: %d) stopped.", pid)))
-	}
-	os.Remove(internal.ExpandUserPath(pidFile))
-}
-
-func restartComfyUIWithEnv(inst *internal.ComfyInstall) {
-	pidFile := internal.ExpandUserPath(filepath.Join(inst.Path, "comfyui.pid"))
-	pid, isRunning := getRunningPIDForEnv(pidFile)
-	if isRunning {
-		stopComfyUIWithEnv(inst)
-		fmt.Println(internal.InfoStyle.Render("Waiting a few seconds before restarting..."))
-		time.Sleep(3 * time.Second)
-	} else {
-		if pid != 0 {
-			fmt.Println(internal.InfoStyle.Render("Previous ComfyUI process was not running (stale PID found and cleaned)."))
-		}
-	}
-	startComfyUIWithEnv(inst, true)
-}
-
-func updateComfyUIWithEnv(inst *internal.ComfyInstall) {
-	// Use the updateComfyUI logic, but for the specified env
-	comfyDir := inst.Path
-	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(comfyDir))
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("python executable not found in 'venv' or '.venv' under %s. Please ensure ComfyUI is installed correctly and the venv is set up.", comfyDir)))
-		return
-	}
-	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Updating ComfyUI at %s...", comfyDir)))
-	fmt.Println(internal.InfoStyle.Render("Pulling latest changes from Git..."))
-	pullOut, err := executeCommand("git", []string{"pull", "origin", "master"}, comfyDir, "", false)
-	if err != nil {
-		pullOutput := ""
-		if pullOut != nil {
-			pullOutput = fmt.Sprintf("%v", pullOut)
-		}
-		unstaged := false
-		if strings.Contains(pullOutput, "would be overwritten by merge") ||
-			strings.Contains(pullOutput, "Please commit your changes or stash them") ||
-			strings.Contains(pullOutput, "error: Your local changes to the following files would be overwritten") {
-			unstaged = true
-		}
-		if unstaged {
-			fmt.Println(internal.ErrorStyle.Render("Git pull failed due to unstaged or conflicting changes in your ComfyUI directory."))
-			fmt.Println(internal.WarningStyle.Render("You must resolve these changes before updating. Choose an action:"))
-			var action string
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewSelect[string]().
-						Title("How would you like to proceed?").
-						Description("Unstaged changes detected. Stash, abort, or resolve manually?").
-						Options(
-							huh.NewOption("Stash changes and retry update", "stash"),
-							huh.NewOption("Abort update", "abort"),
-							huh.NewOption("I'll resolve manually, then retry", "manual"),
-						).
-						Value(&action),
-				),
-			).WithTheme(huh.ThemeCharm())
-			_ = form.Run()
-			if action == "stash" {
-				fmt.Println(internal.InfoStyle.Render("Stashing local changes..."))
-				_, stashErr := executeCommand("git", []string{"stash"}, comfyDir, "", false)
-				if stashErr != nil {
-					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to stash changes: %v", stashErr)))
-					return
-				}
-				fmt.Println(internal.SuccessStyle.Render("Changes stashed. Retrying update..."))
-				_, err2 := executeCommand("git", []string{"pull", "origin", "master"}, comfyDir, "", false)
-				if err2 != nil {
-					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Git pull still failed: %v", err2)))
-					return
-				}
-				fmt.Println(internal.SuccessStyle.Render("Git pull successful after stashing."))
-				var popStash bool
-				form2 := huh.NewForm(
-					huh.NewGroup(
-						huh.NewConfirm().
-							Title("Would you like to apply (pop) your stashed changes now?").
-							Value(&popStash),
-					),
-				).WithTheme(huh.ThemeCharm())
-				_ = form2.Run()
-				if popStash {
-					fmt.Println(internal.InfoStyle.Render("Applying stashed changes..."))
-					_, popErr := executeCommand("git", []string{"stash", "pop"}, comfyDir, "", false)
-					if popErr != nil {
-						fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to pop stash: %v", popErr)))
-					} else {
-						fmt.Println(internal.SuccessStyle.Render("Stashed changes applied."))
-					}
-				} else {
-					fmt.Println(internal.InfoStyle.Render("You can apply your stashed changes later with 'git stash pop' in your ComfyUI directory."))
-				}
-			} else if action == "abort" {
-				fmt.Println(internal.InfoStyle.Render("Update aborted. No changes made."))
-				return
-			} else {
-				fmt.Println(internal.InfoStyle.Render("Please resolve the git issue in your ComfyUI directory, then retry the update."))
-				return
-			}
-		} else {
-			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update ComfyUI (git pull): %v", err)))
-			return
-		}
-	} else {
-		fmt.Println(internal.SuccessStyle.Render("Git pull successful."))
-	}
-	fmt.Println(internal.InfoStyle.Render("Updating Python dependencies..."))
-	reqTxt := internal.ExpandUserPath(filepath.Join(comfyDir, "requirements.txt"))
-	if _, err := os.Stat(reqTxt); os.IsNotExist(err) {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("requirements.txt not found at %s. Skipping dependency update.", reqTxt)))
-		fmt.Println(internal.SuccessStyle.Render("ComfyUI core updated. Dependency update skipped."))
-		return
-	}
-	uvPath, err := exec.LookPath("uv")
-	if err == nil {
-		args := []string{"pip", "install", "-r", reqTxt}
-		_, err = executeCommand(uvPath, args, comfyDir, "", false)
-		if err != nil {
-			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update dependencies (uv pip install): %v", err)))
-			return
-		}
-		fmt.Println(internal.SuccessStyle.Render("ComfyUI and dependencies updated successfully."))
-		return
-	}
-	// Fallback to venvPython if uv is not found
-	args := []string{"pip", "install", "-r", reqTxt}
-	_, err = executeCommand(venvPython, args, comfyDir, "", false)
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update dependencies (pip install): %v", err)))
-		return
-	}
-	fmt.Println(internal.SuccessStyle.Render("ComfyUI and dependencies updated successfully."))
-}
-
-func statusComfyUIWithEnv(inst *internal.ComfyInstall) {
-	fmt.Println(internal.TitleStyle.Render(fmt.Sprintf("Status for environment: %s (%s)", inst.Name, inst.Path)))
-
-	// 1. .env validation
-	envFileCU := internal.ExpandUserPath(filepath.Join(filepath.Dir(inst.Path), ".env"))
-	envFileCLI := internal.ExpandUserPath(filepath.Join(appPaths.CliDir, ".env"))
-	chosenEnvFile := ""
-	if _, err := os.Stat(envFileCU); err == nil {
-		chosenEnvFile = envFileCU
-	} else if _, err := os.Stat(envFileCLI); err == nil {
-		chosenEnvFile = envFileCLI
-	} else {
-		chosenEnvFile = envFileCU // fallback for error message
-	}
-	// fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("[DEBUG] Reading .env from: %s", chosenEnvFile)))
-	envVars, envErr := internal.ReadEnvFile(chosenEnvFile)
-	// fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("[DEBUG] .env contents: %+v", envVars)))
-	missingVars := []string{}
-	if envErr != nil {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Could not read .env file at %s: %v", chosenEnvFile, envErr)))
-		missingVars = append(missingVars, "COMFYUI_PATH")
-	} else {
-		val := envVars["COMFYUI_PATH"]
-		// fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("[DEBUG] Parsed COMFYUI_PATH: '%s'", val)))
-		if val == "" {
-			missingVars = append(missingVars, "COMFYUI_PATH")
-		}
-	}
-
-	if len(missingVars) > 0 {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Missing required .env variables: %s", strings.Join(missingVars, ", "))))
-		fmt.Println(internal.InfoStyle.Render("Example .env content:"))
-		fmt.Println("COMFYUI_PATH=/path/to/your/ComfyUI")
-	}
-
-	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(inst.Path))
-	venvPath := ""
-	if err == nil {
-		venvPath = internal.ExpandUserPath(filepath.Dir(filepath.Dir(venvPython)))
-		fmt.Printf("  Virtualenv: %s\n", venvPath)
-		fmt.Printf("  Python: %s\n", venvPython)
-	} else {
-		fmt.Printf("  Virtualenv: %s\n", internal.WarningStyle.Render("Not found (no venv or .venv)"))
-		fmt.Printf("  Python: %s\n", internal.WarningStyle.Render("Not found (no venv or .venv)"))
-	}
-
-	pidFile := internal.ExpandUserPath(filepath.Join(filepath.Dir(inst.Path), "comfyui.pid"))
-	pid, isRunning := 0, false
-	if f, err := os.Open(pidFile); err == nil {
-		var pidVal int
-		fmt.Fscanf(f, "%d", &pidVal)
-		f.Close()
-		if pidVal > 0 {
-			pid = pidVal
-			isRunning = isProcessRunning(pid)
-		}
-	}
-	if isRunning {
-		fmt.Printf("  Status: %s (PID: %d)\n", internal.SuccessStyle.Render("Running"), pid)
-	} else if pid != 0 {
-		fmt.Printf("  Status: %s (stale PID: %d)\n", internal.WarningStyle.Render("Not running, stale PID file found"), pid)
-		// Prompt for cleanup
-		var cleanup bool
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewConfirm().Title(fmt.Sprintf("Remove stale PID file %s?", pidFile)).Value(&cleanup),
-			),
-		).WithTheme(huh.ThemeCharm())
-		_ = form.Run()
-		if cleanup {
-			if err := os.Remove(pidFile); err == nil {
-				fmt.Println(internal.SuccessStyle.Render("Stale PID file removed."))
-			} else {
-				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to remove PID file: %v", err)))
-			}
-		}
-	} else {
-		fmt.Printf("  Status: %s\n", internal.InfoStyle.Render("Not running"))
-	}
-	fmt.Println()
-}
-
-// migrateCustomNodes orchestrates migration of custom nodes between environments.
-func migrateCustomNodes() {
-	fmt.Println(internal.TitleStyle.Render("Migrate Custom Nodes Between Environments"))
+// migrateWorkflows allows the user to copy workflow JSON files between environments.
+func migrateWorkflows() {
+	fmt.Println(internal.TitleStyle.Render("Migrate Workflows Between Environments"))
 	cfg, err := internal.LoadGlobalConfig()
 	if err != nil || len(cfg.Installs) < 2 {
-		fmt.Println(internal.ErrorStyle.Render("At least two environments must be configured to migrate nodes."))
+		fmt.Println(internal.ErrorStyle.Render("At least two environments must be configured to migrate workflows."))
 		return
 	}
 
@@ -2086,29 +1759,29 @@ func migrateCustomNodes() {
 		return
 	}
 
-	// 2. List custom nodes in source env
-	srcCustomNodesDir := internal.ExpandUserPath(filepath.Join(src.Path, "custom_nodes"))
-	dstCustomNodesDir := internal.ExpandUserPath(filepath.Join(dst.Path, "custom_nodes"))
-	files, err := os.ReadDir(srcCustomNodesDir)
+	// 2. List workflow JSON files in source env
+	srcWorkflowsDir := internal.ExpandUserPath(filepath.Join(src.Path, "workflows"))
+	dstWorkflowsDir := internal.ExpandUserPath(filepath.Join(dst.Path, "workflows"))
+	files, err := os.ReadDir(srcWorkflowsDir)
 	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render("Failed to read source custom_nodes directory: " + err.Error()))
+		fmt.Println(internal.ErrorStyle.Render("Failed to read source workflows directory: " + err.Error()))
 		return
 	}
-	var nodeNames []string
+	var workflowFiles []string
 	for _, f := range files {
-		if f.IsDir() {
-			nodeNames = append(nodeNames, f.Name())
+		if !f.IsDir() && strings.HasSuffix(f.Name(), ".json") {
+			workflowFiles = append(workflowFiles, f.Name())
 		}
 	}
-	if len(nodeNames) == 0 {
-		fmt.Println(internal.InfoStyle.Render("No custom nodes found in source environment."))
+	if len(workflowFiles) == 0 {
+		fmt.Println(internal.InfoStyle.Render("No workflow JSON files found in source environment."))
 		return
 	}
 	var selected []string
 	form2 := huh.NewForm(huh.NewGroup(
-		huh.NewMultiSelect[string]().Title("Select custom nodes to migrate:").OptionsFunc(func() []huh.Option[string] {
-			opts := make([]huh.Option[string], len(nodeNames))
-			for i, n := range nodeNames {
+		huh.NewMultiSelect[string]().Title("Select workflows to migrate:").OptionsFunc(func() []huh.Option[string] {
+			opts := make([]huh.Option[string], len(workflowFiles))
+			for i, n := range workflowFiles {
 				opts[i] = huh.NewOption(n, n)
 			}
 			return opts
@@ -2116,137 +1789,158 @@ func migrateCustomNodes() {
 	)).WithTheme(huh.ThemeCharm())
 	_ = form2.Run()
 	if len(selected) == 0 {
-		fmt.Println(internal.InfoStyle.Render("No nodes selected. Migration cancelled."))
+		fmt.Println(internal.InfoStyle.Render("No workflows selected. Migration cancelled."))
 		return
 	}
 
-	// 3. For each node, prompt for migration method and perform migration
-	type migResult struct {
-		Node   string
-		Method string
-		Err    error
+	// 3. Copy selected workflows
+	if err := os.MkdirAll(dstWorkflowsDir, 0755); err != nil {
+		fmt.Println(internal.ErrorStyle.Render("Failed to create target workflows directory: " + err.Error()))
+		return
 	}
-	results := []migResult{}
-	for _, node := range selected {
-		// Check if node is a known default node (has repo)
-		repoURL := ""
-		for _, def := range internal.DefaultCustomNodes() {
-			if def.Name == node {
-				repoURL = def.Repo
-				break
-			}
+	var results []string
+	for _, wf := range selected {
+		srcPath := filepath.Join(srcWorkflowsDir, wf)
+		dstPath := filepath.Join(dstWorkflowsDir, wf)
+		input, err := os.ReadFile(srcPath)
+		if err != nil {
+			results = append(results, fmt.Sprintf("%s: %s", wf, internal.ErrorStyle.Render("Failed to read")))
+			continue
 		}
-		method := "copy"
-		if repoURL != "" {
-			var mth string
-			form3 := huh.NewForm(huh.NewGroup(
-				huh.NewSelect[string]().Title(fmt.Sprintf("Migrate node '%s':", node)).Options(
-					huh.NewOption("Copy from disk (current version)", "copy"),
-					huh.NewOption("Download latest from GitHub", "github"),
-				).Value(&mth),
-			)).WithTheme(huh.ThemeCharm())
-			_ = form3.Run()
-			if mth != "" {
-				method = mth
-			}
+		if err := os.WriteFile(dstPath, input, 0644); err != nil {
+			results = append(results, fmt.Sprintf("%s: %s", wf, internal.ErrorStyle.Render("Failed to write")))
+			continue
 		}
-		var err error
-		if method == "copy" {
-			err = internal.CopyAndInstallCustomNodes(srcCustomNodesDir, dstCustomNodesDir, dst.Path+"/venv", []string{node})
-			// After copy, try to install requirements.txt with uv or pip
-			reqFile := internal.ExpandUserPath(filepath.Join(dstCustomNodesDir, node, "requirements.txt"))
-			venvPython, venvErr := internal.FindVenvPython(dst.Path)
-			venvBin := filepath.Join(filepath.Dir(filepath.Dir(venvPython)), "bin")
-			uvPath, _ := exec.LookPath("uv")
-			if venvErr == nil && err == nil {
-				if _, statErr := os.Stat(reqFile); statErr == nil {
-					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Installing requirements for '%s' in %s...", node, reqFile)))
-					if uvPath != "" {
-						cmd := exec.Command(uvPath, "pip", "install", "-r", reqFile)
-						cmd.Dir = filepath.Join(dstCustomNodesDir, node)
-						cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+filepath.Dir(filepath.Dir(venvPython)))
-						cmd.Stdout = os.Stdout
-						cmd.Stderr = os.Stderr
-						if uvErr := cmd.Run(); uvErr == nil {
-							fmt.Println(internal.SuccessStyle.Render("uv pip install succeeded."))
-						} else {
-							fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("uv pip install failed: %v. Falling back to pip...", uvErr)))
-							pipPath := filepath.Join(venvBin, "pip")
-							if _, pipStat := os.Stat(pipPath); pipStat == nil {
-								cmdPip := exec.Command(pipPath, "install", "-r", reqFile)
-								cmdPip.Dir = filepath.Join(dstCustomNodesDir, node)
-								cmdPip.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+filepath.Dir(filepath.Dir(venvPython)))
-								cmdPip.Stdout = os.Stdout
-								cmdPip.Stderr = os.Stderr
-								if pipErr := cmdPip.Run(); pipErr == nil {
-									fmt.Println(internal.SuccessStyle.Render("pip install succeeded."))
-								} else {
-									fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("pip install failed: %v", pipErr)))
-								}
-							}
-						}
-					}
-				}
-			}
-		} else if method == "github" && repoURL != "" {
-			dstDir := internal.ExpandUserPath(filepath.Join(dstCustomNodesDir, node))
-			_ = os.RemoveAll(dstDir)
-			cmd := exec.Command("git", "clone", repoURL, dstDir)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			err = cmd.Run()
-			if err == nil {
-				reqFile := internal.ExpandUserPath(filepath.Join(dstDir, "requirements.txt"))
-				err = internal.InstallNodeRequirements(dst.Path+"/venv", dstDir, reqFile)
-			}
-		}
-		results = append(results, migResult{Node: node, Method: method, Err: err})
+		results = append(results, fmt.Sprintf("%s: %s", wf, internal.SuccessStyle.Render("Copied")))
 	}
 
-	// 4. Summary report
-	fmt.Println(internal.TitleStyle.Render("\nMigration Summary:"))
+	// 4. Summary
+	fmt.Println(internal.TitleStyle.Render("\nWorkflow Migration Summary:"))
 	for _, r := range results {
-		status := internal.SuccessStyle.Render("Success")
-		if r.Err != nil {
-			status = internal.ErrorStyle.Render("Failed: " + r.Err.Error())
-		}
-		fmt.Printf("  %s: %s (%s)\n", r.Node, r.Method, status)
+		fmt.Println("  " + r)
 	}
 }
 
-// removeEnvironment disconnects an environment from the config without deleting files.
-func removeEnvironment(inst *internal.ComfyInstall) {
-	if inst == nil {
-		fmt.Println(internal.ErrorStyle.Render("No environment selected or found."))
-		return
-	}
-	if inst.Type == internal.LoungeInstall {
-		fmt.Println(internal.WarningStyle.Render("Warning: You are about to disconnect the Lounge (main) environment. This is your primary environment!"))
-	}
-	var confirm bool
-	form := huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Are you sure you want to disconnect this environment? This will NOT delete any files on disk.").Value(&confirm))).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
-	if !confirm {
-		fmt.Println(internal.InfoStyle.Render("Operation cancelled by user."))
-		return
-	}
+// migrateCustomNodes allows the user to copy custom node directories between environments and install requirements.
+func migrateCustomNodes() {
+	fmt.Println(internal.TitleStyle.Render("Migrate Custom Nodes Between Environments"))
 	cfg, err := internal.LoadGlobalConfig()
+	if err != nil || len(cfg.Installs) < 2 {
+		fmt.Println(internal.ErrorStyle.Render("At least two environments must be configured to migrate custom nodes."))
+		return
+	}
+
+	// 1. Prompt for source and target environments
+	envOptions := []huh.Option[string]{}
+	for _, inst := range cfg.Installs {
+		label := string(inst.Type)
+		if inst.Name != "" && inst.Name != string(inst.Type) {
+			label += " - " + inst.Name
+		}
+		envOptions = append(envOptions, huh.NewOption(label, string(inst.Type)))
+	}
+	var srcEnvType, dstEnvType string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().Title("Select source environment:").Options(envOptions...).Value(&srcEnvType),
+			huh.NewSelect[string]().Title("Select target environment:").Options(envOptions...).Value(&dstEnvType),
+		),
+	).WithTheme(huh.ThemeCharm())
+	_ = form.Run()
+	if srcEnvType == dstEnvType || srcEnvType == "" || dstEnvType == "" {
+		fmt.Println(internal.InfoStyle.Render("Migration cancelled (invalid selection)."))
+		return
+	}
+	src := cfg.FindInstallByType(internal.InstallType(srcEnvType))
+	dst := cfg.FindInstallByType(internal.InstallType(dstEnvType))
+	if src == nil || dst == nil {
+		fmt.Println(internal.ErrorStyle.Render("Invalid environment selection."))
+		return
+	}
+
+	// 2. List custom node directories in source env
+	srcNodesDir := internal.ExpandUserPath(filepath.Join(src.Path, "custom_nodes"))
+	dstNodesDir := internal.ExpandUserPath(filepath.Join(dst.Path, "custom_nodes"))
+	files, err := os.ReadDir(srcNodesDir)
 	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render("Failed to load config: " + err.Error()))
+		fmt.Println(internal.ErrorStyle.Render("Failed to read source custom_nodes directory: " + err.Error()))
 		return
 	}
-	cfg.RemoveInstallByType(inst.Type)
-	if err := internal.SaveGlobalConfig(cfg); err != nil {
-		fmt.Println(internal.ErrorStyle.Render("Failed to update config: " + err.Error()))
+	var nodeDirs []string
+	for _, f := range files {
+		if f.IsDir() && f.Name() != "venv" && f.Name() != ".venv" {
+			nodeDirs = append(nodeDirs, f.Name())
+		}
+	}
+	if len(nodeDirs) == 0 {
+		fmt.Println(internal.InfoStyle.Render("No custom node directories found in source environment."))
 		return
 	}
-	fmt.Println(internal.SuccessStyle.Render("Environment disconnected from Comfy Chair config."))
-	// Platform-specific instructions
-	fmt.Println(internal.InfoStyle.Render("\nTo delete the environment files from disk, run the following command in your terminal:"))
-	if runtime.GOOS == "windows" {
-		fmt.Println("  rmdir /S /Q \"" + inst.Path + "\"")
+	var selected []string
+	form2 := huh.NewForm(huh.NewGroup(
+		huh.NewMultiSelect[string]().Title("Select custom nodes to migrate:").OptionsFunc(func() []huh.Option[string] {
+			opts := make([]huh.Option[string], len(nodeDirs))
+			for i, n := range nodeDirs {
+				opts[i] = huh.NewOption(n, n)
+			}
+			return opts
+		}, nil).Value(&selected),
+	)).WithTheme(huh.ThemeCharm())
+	_ = form2.Run()
+	if len(selected) == 0 {
+		fmt.Println(internal.InfoStyle.Render("No custom nodes selected. Migration cancelled."))
+		return
+	}
+
+	// 3. Copy selected custom nodes and install requirements
+	if err := os.MkdirAll(dstNodesDir, 0755); err != nil {
+		fmt.Println(internal.ErrorStyle.Render("Failed to create target custom_nodes directory: " + err.Error()))
+		return
+	}
+	venvPath := filepath.Join(dst.Path, "venv")
+	if _, err := os.Stat(venvPath); os.IsNotExist(err) {
+		venvPath = filepath.Join(dst.Path, ".venv")
+	}
+	results := []string{}
+	err = internal.CopyAndInstallCustomNodes(srcNodesDir, dstNodesDir, venvPath, selected)
+	if err != nil {
+		results = append(results, internal.ErrorStyle.Render(err.Error()))
 	} else {
-		fmt.Println("  rm -rf \"" + inst.Path + "\"")
+		for _, n := range selected {
+			results = append(results, fmt.Sprintf("%s: %s", n, internal.SuccessStyle.Render("Migrated")))
+		}
 	}
-	fmt.Println(internal.WarningStyle.Render("This will permanently delete all files in the environment directory. Use with caution!"))
+
+	// 4. Summary
+	fmt.Println(internal.TitleStyle.Render("\nCustom Node Migration Summary:"))
+	for _, r := range results {
+		fmt.Println("  " + r)
+	}
+}
+
+// syncEnvWithExample copies missing keys from .env.example to .env, preserving existing values.
+func syncEnvWithExample() error {
+	envPath := appPaths.EnvFile
+	examplePath := envPath + ".example"
+	existing, err := internal.ReadEnvFile(envPath)
+	if err != nil {
+		return fmt.Errorf("failed to read .env: %w", err)
+	}
+	example, err := internal.ReadEnvFile(examplePath)
+	if err != nil {
+		return fmt.Errorf("failed to read .env.example: %w", err)
+	}
+	changed := false
+	for k, v := range example {
+		if _, ok := existing[k]; !ok {
+			existing[k] = v
+			changed = true
+		}
+	}
+	if changed {
+		if err := internal.WriteEnvFile(envPath, existing); err != nil {
+			return fmt.Errorf("failed to write .env: %w", err)
+		}
+	}
+	return nil
 }
