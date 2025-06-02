@@ -1160,16 +1160,7 @@ func main() {
 					debounce = d
 				}
 			}
-			includedDirs := []string{}
-			if val := os.Getenv("COMFY_RELOAD_INCLUDE_DIRS"); val != "" {
-				for _, d := range strings.Split(val, ",") {
-					trimmed := strings.TrimSpace(d)
-					if trimmed != "" {
-						includedDirs = append(includedDirs, trimmed)
-					}
-				}
-			}
-			// If includedDirs is empty, prompt user to select custom node dirs
+			includedDirs := inst.ReloadIncludeDirs
 			if len(includedDirs) == 0 {
 				entries, err := os.ReadDir(watchDir)
 				if err == nil {
@@ -1185,6 +1176,14 @@ func main() {
 					)).WithTheme(huh.ThemeCharm())
 					_ = form.Run()
 					includedDirs = selected
+					// Save to comfy-installs.json
+					cfg, _ := internal.LoadGlobalConfig()
+					for i := range cfg.Installs {
+						if cfg.Installs[i].Type == inst.Type {
+							cfg.Installs[i].ReloadIncludeDirs = includedDirs
+						}
+					}
+					_ = internal.SaveGlobalConfig(cfg)
 				}
 			}
 			reloadComfyUI(watchDir, debounce, exts, includedDirs)
@@ -1440,16 +1439,7 @@ func main() {
 					debounce = d
 				}
 			}
-			includedDirs := []string{}
-			if val := os.Getenv("COMFY_RELOAD_INCLUDE_DIRS"); val != "" {
-				for _, d := range strings.Split(val, ",") {
-					trimmed := strings.TrimSpace(d)
-					if trimmed != "" {
-						includedDirs = append(includedDirs, trimmed)
-					}
-				}
-			}
-			// If includedDirs is empty, prompt user to select custom node dirs
+			includedDirs := inst.ReloadIncludeDirs
 			if len(includedDirs) == 0 {
 				entries, err := os.ReadDir(watchDir)
 				if err == nil {
@@ -1465,13 +1455,26 @@ func main() {
 					)).WithTheme(huh.ThemeCharm())
 					_ = form.Run()
 					includedDirs = selected
+					// Save to comfy-installs.json
+					cfg, _ := internal.LoadGlobalConfig()
+					for i := range cfg.Installs {
+						if cfg.Installs[i].Type == inst.Type {
+							cfg.Installs[i].ReloadIncludeDirs = includedDirs
+						}
+					}
+					_ = internal.SaveGlobalConfig(cfg)
 				}
 			}
 			reloadComfyUI(watchDir, debounce, exts, includedDirs)
 		case "status":
 			runWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) })
 		case "watch_nodes":
-			customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
+			inst, err := getActiveComfyInstall()
+			if err != nil {
+				fmt.Println(internal.ErrorStyle.Render(err.Error()))
+				os.Exit(1)
+			}
+			customNodesDir := internal.ExpandUserPath(filepath.Join(inst.Path, "custom_nodes"))
 			entries, err := os.ReadDir(customNodesDir)
 			if err != nil {
 				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to read custom_nodes directory: %v", err)))
@@ -1510,21 +1513,18 @@ func main() {
 				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Error running form: %v", err)))
 				os.Exit(1)
 			}
-			envMap := make(map[string]string)
-			if _, err := os.Stat(internal.ExpandUserPath(appPaths.EnvFile)); err == nil {
-				existingEnv, readErr := godotenv.Read(appPaths.EnvFile)
-				if readErr == nil {
-					for k, v := range existingEnv {
-						envMap[k] = v
-					}
+			// Save to comfy-installs.json
+			cfg, _ := internal.LoadGlobalConfig()
+			for i := range cfg.Installs {
+				if cfg.Installs[i].Type == inst.Type {
+					cfg.Installs[i].ReloadIncludeDirs = selected
 				}
 			}
-			envMap["COMFY_RELOAD_INCLUDE_DIRS"] = strings.Join(selected, ",")
-			if err := godotenv.Write(envMap, appPaths.EnvFile); err != nil {
-				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update .env: %v", err)))
+			if err := internal.SaveGlobalConfig(cfg); err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update comfy-installs.json: %v", err)))
 				os.Exit(1)
 			}
-			fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Updated .env: COMFY_RELOAD_INCLUDE_DIRS=%s", strings.Join(selected, ","))))
+			fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Updated comfy-installs.json: reload_include_dirs=%s", strings.Join(selected, ","))))
 			os.Exit(0)
 		case "sync-env":
 			err := syncEnvWithExample()

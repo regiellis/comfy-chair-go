@@ -56,11 +56,12 @@ const (
 // Den:    A secondary/dev install (for development, feature branches, or alternate configs)
 // Nook:   An experimental/testing install (for testing new nodes, plugins, or risky changes)
 type ComfyInstall struct {
-	Name        string      `json:"name"`
-	Type        InstallType `json:"type"` // lounge, den, nook
-	Path        string      `json:"path"`
-	IsDefault   bool        `json:"is_default"`
-	CustomNodes []string    `json:"custom_nodes"`
+	Name              string      `json:"name"`
+	Type              InstallType `json:"type"` // lounge, den, nook
+	Path              string      `json:"path"`
+	IsDefault         bool        `json:"is_default"`
+	CustomNodes       []string    `json:"custom_nodes"`
+	ReloadIncludeDirs []string    `json:"reload_include_dirs,omitempty"`
 }
 
 // GlobalConfig holds all ComfyUI installs.

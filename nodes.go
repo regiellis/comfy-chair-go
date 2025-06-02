@@ -251,17 +251,11 @@ func listCustomNodes() {
 		return
 	}
 
-	// Parse active nodes from .env
+	// Parse active nodes from comfy-installs.json
 	activeNodes := map[string]bool{}
-	if envMap, err := internal.ReadEnvFile(internal.ExpandUserPath(appPaths.EnvFile)); err == nil {
-		if dirs, ok := envMap["COMFY_RELOAD_INCLUDE_DIRS"]; ok {
-			dirs = strings.Trim(dirs, "[]\"")
-			for _, d := range strings.Split(dirs, ",") {
-				d = strings.TrimSpace(d)
-				if d != "" {
-					activeNodes[d] = true
-				}
-			}
+	if inst, err := getActiveComfyInstall(); err == nil && inst != nil {
+		for _, d := range inst.ReloadIncludeDirs {
+			activeNodes[d] = true
 		}
 	}
 
@@ -308,15 +302,13 @@ func listCustomNodes() {
 		nodeNames = append(nodeNames, row.Name)
 	}
 	var selected string
+	opts := make([]huh.Option[string], len(nodeNames))
+	for i, name := range nodeNames {
+		opts[i] = huh.NewOption(name, name)
+	}
 	selectPrompt := huh.NewSelect[string]().
 		Title("Select a node to view its README.md (markdown rendered):").
-		Options(func() []huh.Option[string] {
-			opts := make([]huh.Option[string], len(nodeNames))
-			for i, name := range nodeNames {
-				opts[i] = huh.NewOption(name, name)
-			}
-			return opts
-		}()...).
+		Options(opts...).
 		Value(&selected)
 	if err := selectPrompt.Run(); err != nil || selected == "" {
 		fmt.Println(internal.InfoStyle.Render("No node selected. Exiting."))
