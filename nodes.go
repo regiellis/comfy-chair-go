@@ -108,21 +108,23 @@ func createNewNode() {
 		return
 	}
 
-	// Prompt for node details
-	var nodeName, nodeDesc, author, license, deps, publisherId, displayName string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().Title("Node Name (no spaces, e.g. MyNode)").Value(&nodeName),
-			huh.NewInput().Title("Short Description").Value(&nodeDesc),
-			huh.NewInput().Title("Author").Value(&author),
-			huh.NewInput().Title("License (e.g. MIT, Apache-2.0)").Value(&license),
-			huh.NewInput().Title("Python Dependencies (comma-separated, optional)").Value(&deps),
-			huh.NewInput().Title("PublisherId (for ComfyUI plugin)").Value(&publisherId),
-			huh.NewInput().Title("DisplayName (for ComfyUI plugin)").Value(&displayName),
-		),
-	).WithTheme(huh.ThemeCharm())
-	if err := form.Run(); err != nil {
-		fmt.Println(internal.InfoStyle.Render("Node creation cancelled."))
+	// Load .env for defaults
+	envVars, _ := internal.ReadEnvFile(appPaths.EnvFile)
+	authorDefault := envVars["CUSTOM_NODES_AUTHOR"]
+	pubidDefault := envVars["CUSTOM_NODES_PUBID"]
+
+	// Prompt for node name, author, pubid
+	var nodeName, author, pubid string
+	author = authorDefault
+	pubid = pubidDefault
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Node Name").Value(&nodeName),
+		huh.NewInput().Title("Author").Value(&author).Placeholder("Your Name"),
+		huh.NewInput().Title("PubID").Value(&pubid).Placeholder("Your PubID"),
+	)).WithTheme(huh.ThemeCharm())
+	_ = form.Run()
+	if nodeName == "" {
+		fmt.Println(internal.InfoStyle.Render("Node creation cancelled (no name provided)."))
 		return
 	}
 
@@ -138,12 +140,12 @@ func createNewNode() {
 	values := map[string]string{
 		"{{NodeName}}":      nodeName,
 		"{{NodeNameLower}}": strings.ToLower(nodeName),
-		"{{NodeDesc}}":      nodeDesc,
+		"{{NodeDesc}}":      "",
 		"{{Author}}":        author,
-		"{{License}}":       license,
-		"{{Dependencies}}":  strings.ReplaceAll(deps, ",", "\n"),
-		"{{PublisherId}}":   publisherId,
-		"{{DisplayName}}":   displayName,
+		"{{License}}":       "",
+		"{{Dependencies}}":  "",
+		"{{PublisherId}}":   pubid,
+		"{{DisplayName}}":   "",
 		"{{Version}}":       "1.0.0",
 	}
 
@@ -647,7 +649,7 @@ func addOrRemoveNodeWorkflows() {
 	}
 
 	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
-	mainWorkflowsDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "workflows"))
+	mainWorkflowsDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "user", "default", "workflows"))
 	trackingFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, ".node_workflows.json"))
 
 	// 1. List custom nodes
