@@ -7,9 +7,6 @@
 
 ---
 
-> [!WARNING]
-> Enviroments are currently broken in main, will fix soon...
-
 >[!TIP]
 > You do not need [Go (Golang)](https://go.dev/) installed to use Comfy Chair. The binary is self-contained and does not require any additional dependencies. You can download the latest release from the releases page and run it directly. You will need to have [UV](https://github.com/astral-sh/uv) installed for the install/update commands to work, but this is not a requirement for running Comfy Chair itself.
 
