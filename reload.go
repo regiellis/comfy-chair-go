@@ -17,6 +17,7 @@ import (
 	"github.com/regiellis/comfyui-chair-go/internal"
 )
 
+// NOTE: includedDirs is now sourced from comfy-installs.json (per environment) via main.go, not from .env.
 func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, includedDirs []string) {
 	logFile := appPaths.LogFile
 	if logFile == "" {

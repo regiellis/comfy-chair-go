@@ -130,7 +130,7 @@ Comfy Chair **automatically detects and uses Python virtual environments** named
 
 - **Opt-in Node Watching for Reloads:**
   - Use the new `watch_nodes` command or select "Select Watched Nodes for Reload" from the interactive menu to choose which custom node directories should trigger reloads. Only the selected directories are watched; all others are ignored by default.
-  - Your selection is saved to `.env` as `COMFY_RELOAD_INCLUDE_DIRS` (comma-separated list).
+  - Your selection is saved to `comfy-installs.json` as `reload_include_dirs` (per environment).
   - Symlinked directories are supported and will be resolved and watched cross-platform.
 - **Command Aliases:** All commands support both `snake_case` and `kebab-case` (e.g., `create_node` and `create-node`).
 - **--help Flag & Usage:** Use `--help`, `-h`, or `help` to show a detailed usage guide with all commands and aliases.
@@ -160,8 +160,6 @@ COMFYUI_PATH=/path/to/your/ComfyUI
 COMFY_RELOAD_EXTS=.py,.js,.css
 # Debounce time in seconds for reloads (default: 5)
 COMFY_RELOAD_DEBOUNCE=5
-# Comma-separated list of custom node directories to watch for reloads (opt-in, default: empty)
-COMFY_RELOAD_INCLUDE_DIRS=
 # GPU type for torch install: nvidia, amd, intel, apple, directml, ascend, cambricon, cpu
 GPU_TYPE=nvidia
 # Python version to use for venv (default: 3.12, 3.13 supported but not all nodes work)
