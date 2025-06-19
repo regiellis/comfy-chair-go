@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -42,6 +43,23 @@ const (
 
 // Define the global appPaths for the project, using the struct from internal/utils.go
 var appPaths internal.Paths
+
+// Process status cache for performance optimization
+type processStatus struct {
+	isRunning bool
+	lastCheck time.Time
+}
+
+type processCache struct {
+	mu          sync.RWMutex
+	cache       map[int]processStatus
+	lastCleanup time.Time
+}
+
+// Global process cache instance
+var procCache = &processCache{
+	cache: make(map[int]processStatus),
+}
 
 // getPythonExecutables returns a list of common Python executable names.
 func getPythonExecutables() []string {
@@ -990,8 +1008,46 @@ func cleanupPIDFile() {
 	}
 }
 
-// isProcessRunning checks if a process with the given PID is currently running.
-func isProcessRunning(pid int) bool {
+// Cache management methods
+func (pc *processCache) cleanupStaleEntries() {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	
+	now := time.Now()
+	// Clean up every 5 minutes
+	if time.Since(pc.lastCleanup) < 5*time.Minute {
+		return
+	}
+	
+	// Remove entries older than 30 seconds
+	for pid, status := range pc.cache {
+		if time.Since(status.lastCheck) > 30*time.Second {
+			delete(pc.cache, pid)
+		}
+	}
+	pc.lastCleanup = now
+}
+
+func (pc *processCache) getCachedStatus(pid int) (processStatus, bool) {
+	pc.mu.RLock()
+	defer pc.mu.RUnlock()
+	
+	status, exists := pc.cache[pid]
+	return status, exists
+}
+
+func (pc *processCache) updateCache(pid int, isRunning bool) {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	
+	pc.cache[pid] = processStatus{
+		isRunning: isRunning,
+		lastCheck: time.Now(),
+	}
+}
+
+// isProcessRunningReal performs the actual system check without caching
+func isProcessRunningReal(pid int) bool {
 	if pid == 0 {
 		return false
 	}
@@ -1010,9 +1066,35 @@ func isProcessRunning(pid int) bool {
 		}
 		return strings.Contains(strings.ToLower(string(output)), strings.ToLower(strconv.Itoa(pid))) // Case-insensitive check for PID
 	}
-	// POSIX: Sending signal 0.
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
+
+	// For POSIX systems, send signal 0 to check if the process exists and is owned by us.
+	if err := process.Signal(syscall.Signal(0)); err != nil {
+		return false // Process doesn't exist or we don't have permission
+	}
+	return true
+}
+
+// isProcessRunning checks if a process with the given PID is currently running (with caching).
+func isProcessRunning(pid int) bool {
+	if pid == 0 {
+		return false
+	}
+
+	// Clean up stale entries periodically
+	procCache.cleanupStaleEntries()
+
+	// Check cache first
+	if status, exists := procCache.getCachedStatus(pid); exists {
+		// Use cached result if it's fresh (within 5 seconds)
+		if time.Since(status.lastCheck) < 5*time.Second {
+			return status.isRunning
+		}
+	}
+
+	// Cache miss or stale - check for real and update cache
+	isRunning := isProcessRunningReal(pid)
+	procCache.updateCache(pid, isRunning)
+	return isRunning
 }
 
 // getRunningPID reads PID from file and checks if the process is running.
