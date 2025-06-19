@@ -134,7 +134,7 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 			if !ok {
 				return
 			}
-			fmt.Printf("[DEBUG] Event: %s, Op: %s\n", event.Name, event.Op)
+			// Debug logging removed to prevent path leakage
 			// Only trigger reload if the event is in an includedDir
 			inIncluded := false
 			for _, dir := range includedDirs {
@@ -144,11 +144,10 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 				}
 			}
 			if !inIncluded {
-				fmt.Printf("[DEBUG] Ignored (not in includedDirs): %s\n", event.Name)
+				// File change ignored - not in watched directories
 				continue
 			}
 			matched := matchesExtension(event.Name, exts)
-			fmt.Printf("[DEBUG] matchesExtension(%s, %v) = %v\n", event.Name, exts, matched)
 			if (event.Op.Has(fsnotify.Write) || event.Op.Has(fsnotify.Create)) && matched {
 				if time.Since(lastRestartTime) > debounceDuration {
 					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", event.Name)))

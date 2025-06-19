@@ -82,7 +82,7 @@ task build   # Build binary
 
 ## Prerequisites
 
-- [Go 1.24](https://go.dev/) (for building from source)
+- [Go 1.23+](https://go.dev/) (for building from source)
 - **ComfyUI** (Python, installed locally)
 - **Python 3** (for ComfyUI venv)
 - [UV](https://github.com/astral-sh/uv) (for fast Python dependency management; required for install/update commands)
