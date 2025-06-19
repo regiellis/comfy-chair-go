@@ -109,17 +109,27 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	
+	// Create a done channel for proper shutdown coordination
+	done := make(chan struct{})
 
 	go func() {
 		<-sigs
 		fmt.Println("\nReceived signal, exiting reload watcher...")
 		close(tailDone)
+		close(done)
+	}()
+
+	defer func() {
 		watcher.Close()
-		os.Exit(0)
+		fmt.Println(internal.InfoStyle.Render("File watcher cleanup completed"))
 	}()
 
 	for {
 		select {
+		case <-done:
+			fmt.Println(internal.InfoStyle.Render("Shutdown signal received, stopping file watcher..."))
+			return
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return
