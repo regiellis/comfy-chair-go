@@ -620,6 +620,11 @@ func updateCustomNodes() {
 		// Run uv from ComfyUI root, pass requirements.txt as relative path
 		relReqFile, _ := filepath.Rel(appPaths.ComfyUIDir, reqFile)
 		if uvPath != "" {
+			// Proactively ensure pip compatibility in uv environment
+			if err := internal.EnsurePipCompatibility(venvPath, uvPath); err != nil {
+				fmt.Println(internal.WarningStyle.Render("Warning: Could not ensure pip compatibility, proceeding anyway"))
+			}
+			
 			fmt.Println(internal.InfoStyle.Render("Trying uv pip install -r requirements.txt ..."))
 			cmdUv := exec.Command(uvPath, "pip", "install", "-r", relReqFile)
 			cmdUv.Dir = internal.ExpandUserPath(appPaths.ComfyUIDir)
@@ -627,7 +632,23 @@ func updateCustomNodes() {
 			cmdUv.Stdout = os.Stdout
 			cmdUv.Stderr = os.Stderr
 			installErr = cmdUv.Run()
-			if installErr == nil {
+			
+			if installErr != nil {
+				// Attempt to detect and fix pip/uv conflicts
+				if fixedErr := internal.DetectAndFixPipUvConflict(installErr, venvPath, uvPath); fixedErr == nil {
+					// Retry after fixing
+					fmt.Println(internal.InfoStyle.Render("Retrying requirements installation after fixing compatibility..."))
+					cmdUvRetry := exec.Command(uvPath, "pip", "install", "-r", relReqFile)
+					cmdUvRetry.Dir = internal.ExpandUserPath(appPaths.ComfyUIDir)
+					cmdUvRetry.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+					cmdUvRetry.Stdout = os.Stdout
+					cmdUvRetry.Stderr = os.Stderr
+					if retryErr := cmdUvRetry.Run(); retryErr == nil {
+						fmt.Println(internal.SuccessStyle.Render("Requirements installed successfully after fixing compatibility"))
+						installErr = nil // Mark as successful
+					}
+				}
+			} else {
 				fmt.Println(internal.SuccessStyle.Render("uv pip install succeeded."))
 			}
 		}

@@ -237,6 +237,74 @@ func copyDir(src, dst string) error {
 	})
 }
 
+// EnsurePipCompatibility ensures pip works correctly in uv-managed environments
+func EnsurePipCompatibility(venvPath, uvPath string) error {
+	if uvPath == "" {
+		return nil // Not a uv environment
+	}
+	
+	venvBin := filepath.Join(venvPath, "bin")
+	if strings.Contains(venvPath, "\\") || strings.Contains(venvPath, ":\\") {
+		venvBin = filepath.Join(venvPath, "Scripts") // Windows
+	}
+	
+	// Run uv pip install -U pip to ensure pip compatibility
+	fmt.Println(InfoStyle.Render("Ensuring pip compatibility in uv environment..."))
+	cmd := exec.Command(uvPath, "pip", "install", "-U", "pip")
+	cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	if err := cmd.Run(); err != nil {
+		fmt.Println(WarningStyle.Render(fmt.Sprintf("Warning: Could not ensure pip compatibility: %v", err)))
+		return err
+	}
+	
+	fmt.Println(SuccessStyle.Render("pip compatibility ensured"))
+	return nil
+}
+
+// DetectAndFixPipUvConflict detects pip/uv conflicts and attempts to fix them
+func DetectAndFixPipUvConflict(err error, venvPath, uvPath string) error {
+	if err == nil || uvPath == "" {
+		return err
+	}
+	
+	errorMsg := err.Error()
+	// Check for common pip/uv conflict indicators
+	conflictIndicators := []string{
+		"externally-managed-environment",
+		"pip._internal",
+		"ModuleNotFoundError: No module named 'pip'",
+		"pip: command not found",
+		"ImportError: No module named pip",
+		"distutils.util",
+		"setuptools",
+	}
+	
+	isConflict := false
+	for _, indicator := range conflictIndicators {
+		if strings.Contains(strings.ToLower(errorMsg), strings.ToLower(indicator)) {
+			isConflict = true
+			break
+		}
+	}
+	
+	if !isConflict {
+		return err
+	}
+	
+	fmt.Println(WarningStyle.Render("Detected pip/uv compatibility issue, attempting to fix..."))
+	
+	// Attempt to fix by ensuring pip compatibility
+	if fixErr := EnsurePipCompatibility(venvPath, uvPath); fixErr != nil {
+		fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to fix pip/uv compatibility: %v", fixErr)))
+		return err // Return original error
+	}
+	
+	return nil // Fixed successfully
+}
+
 // installNodeRequirements tries uv pip install -r requirements.txt, falls back to pip if uv is not found.
 func installNodeRequirements(venvPath, nodeDir, reqFile string) error {
 	venvBin := filepath.Join(venvPath, "bin")
@@ -259,11 +327,30 @@ func installNodeRequirements(venvPath, nodeDir, reqFile string) error {
 	}
 	var installErr error
 	if uvPath != "" {
+		// Proactively ensure pip compatibility in uv environment
+		if err := EnsurePipCompatibility(venvPath, uvPath); err != nil {
+			fmt.Println(WarningStyle.Render("Warning: Could not ensure pip compatibility, proceeding anyway"))
+		}
+		
 		cmdUv := exec.Command(uvPath, "pip", "install", "-r", reqFile)
 		cmdUv.Dir = nodeDir
 		cmdUv.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
 		installErr = cmdUv.Run()
-		if installErr == nil {
+		
+		if installErr != nil {
+			// Attempt to detect and fix pip/uv conflicts
+			if fixedErr := DetectAndFixPipUvConflict(installErr, venvPath, uvPath); fixedErr == nil {
+				// Retry after fixing
+				fmt.Println(InfoStyle.Render("Retrying requirements installation after fixing compatibility..."))
+				cmdUvRetry := exec.Command(uvPath, "pip", "install", "-r", reqFile)
+				cmdUvRetry.Dir = nodeDir
+				cmdUvRetry.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+				if retryErr := cmdUvRetry.Run(); retryErr == nil {
+					fmt.Println(SuccessStyle.Render("Requirements installed successfully after fixing compatibility"))
+					return nil
+				}
+			}
+		} else {
 			return nil
 		}
 	}
