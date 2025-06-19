@@ -339,3 +339,18 @@ func PromptForPortConflict(desiredPort int) (int, error) {
 	}
 	return -1, fmt.Errorf("user declined to use alternative port")
 }
+
+// HandleFormError provides consistent error handling for huh form operations
+func HandleFormError(err error, operationName string) bool {
+	if err == nil {
+		return false // No error, continue
+	}
+	
+	if errors.Is(err, huh.ErrUserAborted) {
+		fmt.Println(InfoStyle.Render(fmt.Sprintf("%s cancelled by user.", operationName)))
+		return true // User cancelled, should exit
+	}
+	
+	fmt.Println(ErrorStyle.Render(fmt.Sprintf("Form error during %s: %v", operationName, err)))
+	return true // Error occurred, should exit
+}

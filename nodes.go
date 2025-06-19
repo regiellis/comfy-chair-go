@@ -23,8 +23,12 @@ import (
 //go:embed all:templates/node
 var nodeTemplateFS embed.FS
 
+// placeholderRegex for efficient placeholder removal
+var placeholderRegex = regexp.MustCompile(`\{\{[^}]*\}\}`)
+
 // Enhanced replacePlaceholders: removes unreplaced vars and ensures quoted strings for Python/JS
 func replacePlaceholders(content string, values map[string]string) string {
+	// Apply replacements first
 	for k, v := range values {
 		if v != "" {
 			if (strings.HasPrefix(k, "{{") && strings.HasSuffix(k, "}}")) && (strings.Contains(content, "\""+k+"\"")) {
@@ -35,21 +39,8 @@ func replacePlaceholders(content string, values map[string]string) string {
 			}
 		}
 	}
-	// Remove any unreplaced {{...}} placeholders
-	for {
-		start := strings.Index(content, "{{")
-		if start == -1 {
-			break
-		}
-		end := strings.Index(content[start:], "}}")
-		if end == -1 {
-			break
-		}
-		end += start + 2
-		// Remove the whole {{...}}
-		content = content[:start] + content[end:]
-	}
-	return content
+	// Remove remaining placeholders in one pass using regex
+	return placeholderRegex.ReplaceAllString(content, "")
 }
 
 // NewZipWriter returns a new zip.Writer for the given file.
@@ -137,7 +128,9 @@ func createNewNode() {
 		huh.NewInput().Title("Author").Value(&author).Placeholder("Your Name"),
 		huh.NewInput().Title("PubID").Value(&pubid).Placeholder("Your PubID"),
 	)).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if internal.HandleFormError(form.Run(), "Node creation") {
+		return
+	}
 	if nodeName == "" {
 		fmt.Println(internal.InfoStyle.Render("Node creation cancelled (no name provided)."))
 		return
@@ -149,7 +142,7 @@ func createNewNode() {
 		return
 	}
 
-	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
+	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, internal.CustomNodesDir))
 	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
 	
 	// Additional security check: ensure nodeDir is within customNodesDir
@@ -161,14 +154,14 @@ func createNewNode() {
 	}
 
 	values := map[string]string{
-		"{{NodeName}}":      nodeName,
-		"{{NodeNameLower}}": strings.ToLower(nodeName),
-		"{{NodeDesc}}":      "",
-		"{{Author}}":        author,
-		"{{License}}":       "",
-		"{{Dependencies}}":  "",
-		"{{PublisherId}}":   pubid,
-		"{{DisplayName}}":   "",
+		internal.NodeNamePlaceholder:      nodeName,
+		internal.NodeNameLowerPlaceholder: strings.ToLower(nodeName),
+		internal.NodeDescPlaceholder:      "",
+		internal.AuthorPlaceholder:        author,
+		"{{License}}":                     "",
+		"{{Dependencies}}":                "",
+		internal.PubIDPlaceholder:         pubid,
+		"{{DisplayName}}":                 "",
 		"{{Version}}":       "1.0.0",
 	}
 
