@@ -848,7 +848,10 @@ func installComfyUI() {
 		{"rgthree-comfy", "https://github.com/rgthree/rgthree-comfy"},
 	}
 	customNodesDir := internal.ExpandUserPath(filepath.Join(installPath, "custom_nodes"))
-	_ = os.MkdirAll(customNodesDir, 0755)
+	if err := os.MkdirAll(customNodesDir, 0755); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to create custom_nodes directory: %v", err)))
+		return
+	}
 	for _, node := range defaultNodes {
 		nodePath := internal.ExpandUserPath(filepath.Join(customNodesDir, node.Name))
 		if _, err := os.Stat(nodePath); os.IsNotExist(err) {
@@ -856,7 +859,11 @@ func installComfyUI() {
 			cmd := exec.Command("git", "clone", node.Repo, nodePath)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			_ = cmd.Run()
+			if err := cmd.Run(); err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to clone node %s: %v", node.Name, err)))
+				continue
+			}
+			fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Successfully cloned node: %s", node.Name)))
 		}
 	}
 
@@ -864,12 +871,17 @@ func installComfyUI() {
 	venvBin := internal.ExpandUserPath(filepath.Join(currentInstallVenvPath, "bin"))
 	uvPath = internal.ExpandUserPath(filepath.Join(venvBin, "uv"))
 	if _, err := os.Stat(uvPath); err == nil {
+		fmt.Println(internal.InfoStyle.Render("Installing comfy-cli in virtual environment..."))
 		cmd := exec.Command(uvPath, "pip", "install", "comfy-cli")
 		cmd.Dir = installPath
 		cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
+		if err := cmd.Run(); err != nil {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to install comfy-cli: %v", err)))
+		} else {
+			fmt.Println(internal.SuccessStyle.Render("Successfully installed comfy-cli"))
+		}
 	}
 
 	// --- Update comfy-installs.json (global config) ---
@@ -893,6 +905,20 @@ func installComfyUI() {
 
 // executeCommand runs a command, optionally in the background.
 func executeCommand(commandName string, args []string, workDir string, logFilePath string, inBackground bool) (*os.Process, error) {
+	// Basic validation: command name should not be empty and should not contain path separators unless it's an absolute path
+	if commandName == "" {
+		return nil, fmt.Errorf("command name cannot be empty")
+	}
+	
+	// Validate working directory if provided
+	if workDir != "" {
+		cleanWorkDir := filepath.Clean(internal.ExpandUserPath(workDir))
+		// Ensure the work directory exists or is creatable
+		if _, err := os.Stat(cleanWorkDir); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("invalid working directory: %w", err)
+		}
+	}
+	
 	cmd := exec.Command(commandName, args...)
 	if workDir != "" {
 		cmd.Dir = internal.ExpandUserPath(workDir)
@@ -902,7 +928,7 @@ func executeCommand(commandName string, args []string, workDir string, logFilePa
 		if logFilePath == "" {
 			return nil, fmt.Errorf("logFilePath cannot be empty for background commands")
 		}
-		logFile, err := os.OpenFile(internal.ExpandUserPath(logFilePath), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		logFile, err := os.OpenFile(internal.ExpandUserPath(logFilePath), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open log file %s: %w", logFilePath, err)
 		}
@@ -917,8 +943,13 @@ func executeCommand(commandName string, args []string, workDir string, logFilePa
 			logFile.Close() // Close file if Start fails.
 			return nil, fmt.Errorf("failed to start command '%s %s' in background: %w", commandName, strings.Join(args, " "), err)
 		}
-		// logFile is intentionally kept open as the background process writes to it.
-		// It will be closed by the OS when the process exits.
+		
+		// Start a goroutine to monitor the process and close the file when it exits
+		go func() {
+			defer logFile.Close()
+			_ = cmd.Wait() // Wait for the process to exit, then close the log file
+		}()
+		
 		return cmd.Process, nil
 	}
 

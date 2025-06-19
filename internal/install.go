@@ -51,7 +51,11 @@ func InstallComfyUI(
 			cmd := exec.Command("git", "clone", node.Repo, nodePath)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			_ = cmd.Run()
+			if err := cmd.Run(); err != nil {
+				fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to clone node %s: %v", node.Name, err)))
+				continue
+			}
+			fmt.Println(SuccessStyle.Render(fmt.Sprintf("Successfully cloned node: %s", node.Name)))
 		}
 		// After cloning, install requirements if present
 		reqFile := filepath.Join(nodePath, "requirements.txt")
@@ -61,12 +65,17 @@ func InstallComfyUI(
 			uvPath := filepath.Join(venvBin, "uv")
 			if _, err := os.Stat(uvPath); err == nil {
 				// Ensure pip is installed in the venv
+				fmt.Println(InfoStyle.Render("Updating pip in virtual environment..."))
 				cmdPip := exec.Command(uvPath, "pip", "install", "-U", "pip")
 				cmdPip.Dir = ExpandUserPath(appPaths.ComfyUIDir)
 				cmdPip.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
 				cmdPip.Stdout = os.Stdout
 				cmdPip.Stderr = os.Stderr
-				_ = cmdPip.Run()
+				if err := cmdPip.Run(); err != nil {
+					fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to update pip: %v", err)))
+				} else {
+					fmt.Println(SuccessStyle.Render("Successfully updated pip"))
+				}
 				// Install requirements if present
 				if _, err := os.Stat(reqFile); err == nil {
 					cmdReq := exec.Command(uvPath, "pip", "install", "-r", reqFile)
@@ -78,12 +87,17 @@ func InstallComfyUI(
 						// Fallback to pip if uv fails
 						pipPath := filepath.Join(venvBin, "pip")
 						if _, err := os.Stat(pipPath); err == nil {
+							fmt.Println(InfoStyle.Render("Falling back to pip for requirements installation..."))
 							cmdPip2 := exec.Command(pipPath, "install", "-r", reqFile)
 							cmdPip2.Dir = nodePath
 							cmdPip2.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
 							cmdPip2.Stdout = os.Stdout
 							cmdPip2.Stderr = os.Stderr
-							_ = cmdPip2.Run()
+							if err := cmdPip2.Run(); err != nil {
+								fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to install requirements with pip fallback: %v", err)))
+							} else {
+								fmt.Println(SuccessStyle.Render("Successfully installed requirements with pip"))
+							}
 						}
 					}
 				}
@@ -97,12 +111,17 @@ func InstallComfyUI(
 		venvBin := filepath.Join(filepath.Dir(filepath.Dir(venvPython)), "bin")
 		uvPath := filepath.Join(venvBin, "uv")
 		if _, err := os.Stat(uvPath); err == nil {
+			fmt.Println(InfoStyle.Render("Installing comfy-cli..."))
 			cmd := exec.Command(uvPath, "pip", "install", "comfy-cli")
 			cmd.Dir = ExpandUserPath(appPaths.ComfyUIDir)
 			cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			_ = cmd.Run()
+			if err := cmd.Run(); err != nil {
+				fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to install comfy-cli: %v", err)))
+			} else {
+				fmt.Println(SuccessStyle.Render("Successfully installed comfy-cli"))
+			}
 		}
 	}
 

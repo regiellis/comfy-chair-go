@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -94,7 +95,21 @@ func isValidNodeName(name string) bool {
 	if name == "" {
 		return false
 	}
-	if strings.ContainsAny(name, " /\\.:") {
+	// Check for path traversal sequences
+	if strings.Contains(name, "..") || strings.Contains(name, "./") || strings.Contains(name, ".\\") {
+		return false
+	}
+	// Check for absolute paths
+	if filepath.IsAbs(name) {
+		return false
+	}
+	// Check for invalid characters (including path separators)
+	if strings.ContainsAny(name, " /\\.:*?\"<>|") {
+		return false
+	}
+	// Only allow alphanumeric, underscore, and hyphen
+	matched, _ := regexp.MatchString(`^[a-zA-Z0-9_-]+$`, name)
+	if !matched {
 		return false
 	}
 	return true
@@ -136,6 +151,14 @@ func createNewNode() {
 
 	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "custom_nodes"))
 	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
+	
+	// Additional security check: ensure nodeDir is within customNodesDir
+	cleanCustomNodesDir := filepath.Clean(customNodesDir)
+	cleanNodeDir := filepath.Clean(nodeDir)
+	if !strings.HasPrefix(cleanNodeDir, cleanCustomNodesDir+string(filepath.Separator)) {
+		fmt.Println(internal.ErrorStyle.Render("Invalid node directory path detected. Node creation cancelled for security reasons."))
+		return
+	}
 
 	values := map[string]string{
 		"{{NodeName}}":      nodeName,
