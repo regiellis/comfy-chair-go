@@ -33,6 +33,7 @@ var procCache = &processCache{
 }
 
 // ExecuteCommand creates and returns an exec.Command with proper stdout/stderr handling
+// For foreground processes, it waits for completion. For background processes, it starts and returns immediately.
 func ExecuteCommand(commandName string, args []string, workDir string, logFilePath string, inBackground bool) (*os.Process, error) {
 	// Basic validation: command name should not be empty and should not contain path separators unless it's an absolute path
 	if commandName == "" {
@@ -53,7 +54,7 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 		cmd.Dir = ExpandUserPath(workDir)
 	}
 
-	// Handle logging
+	// Handle logging and I/O redirection
 	if logFilePath != "" && inBackground {
 		logFile, err := os.OpenFile(ExpandUserPath(logFilePath), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
@@ -63,14 +64,28 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 		cmd.Stderr = logFile
 		cmd.ExtraFiles = []*os.File{logFile}
 	} else {
+		// For foreground processes, connect to stdin to allow interaction
+		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 	}
 
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("command '%s %s' execution failed: %w", commandName, strings.Join(args, " "), err)
+	if inBackground {
+		// Background mode: start process and return immediately
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("command '%s %s' execution failed: %w", commandName, strings.Join(args, " "), err)
+		}
+		return cmd.Process, nil
+	} else {
+		// Foreground mode: start process and wait for completion
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("command '%s %s' execution failed: %w", commandName, strings.Join(args, " "), err)
+		}
+		
+		// Wait for the process to complete (this allows Ctrl+C to work properly)
+		_ = cmd.Wait()
+		return cmd.Process, nil
 	}
-	return cmd.Process, nil
 }
 
 // ReadPID reads the process ID from the pidFile.
