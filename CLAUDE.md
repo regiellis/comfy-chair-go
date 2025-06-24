@@ -141,3 +141,73 @@ The `internal/` package contains reusable modules:
 - **Consistent Menu Navigation**: All operations now include "Return to Main Menu" prompts after completion
 - **Non-blocking Failures**: Configuration errors don't cause hard exits, users can navigate to Install/Setup options
 - **Better Error Messages**: Informative error messages that guide users to solutions rather than just reporting failures
+
+## Project Specifications & Development Roadmap
+
+### Specification Directory Structure
+The `./spec/` directory contains comprehensive improvement plans and technical specifications:
+
+- **`spec/improvement-roadmap.md`** - Complete improvement roadmap with 4-phase development plan
+- **`spec/phases/`** - Detailed specifications for each development phase
+- **`spec/architecture/`** - Technical architecture and design documents
+- **`spec/README.md`** - Overview and navigation guide
+
+### Development Phase Strategy
+
+#### Phase 1: Code Quality & Foundation (v1.4.0)
+**Branch**: `feature/phase1-code-quality`
+- Remove unused functions and clean up technical debt
+- Add comprehensive testing infrastructure (target: 60% coverage)
+- Continue main.go refactoring (extract menu, migration modules)
+- Add version flag, improved logging, shell completion
+
+#### Phase 2: Enhanced User Experience (v1.5.0)
+**Branch**: `feature/phase2-user-experience`
+- Interactive configuration wizard for first-time setup
+- Configuration validation and health checking (`comfy-chair validate`)
+- Enhanced help system with examples and troubleshooting
+- Improved error handling with actionable solutions
+
+#### Phase 3: Advanced Features (v1.6.0)
+**Branch**: `feature/phase3-advanced-features`
+- Performance monitoring and resource tracking
+- Multiple node scaffolding templates
+- Health checks and log analysis
+- Node marketplace integration
+
+#### Phase 4: Developer Experience (v1.7.0)
+**Branch**: `feature/phase4-developer-experience`
+- Debug mode and API integration
+- Enhanced hot reload with selective reloading
+- Development workflow improvements
+- Plugin system and advanced tooling
+
+### Branch Management for Phases
+
+#### Feature Branch Workflow
+1. **Create phase branch**: `git checkout -b feature/phase{N}-{description}`
+2. **Implement incrementally**: Make small, focused commits with clear messages
+3. **Regular integration**: Rebase against main to stay current
+4. **Pull request review**: Each phase gets comprehensive review before merge
+5. **Release tagging**: Tag releases at completion of each phase
+
+#### Commit Message Guidelines for Phases
+```
+phase{N}: brief description of change
+
+Detailed explanation of what was implemented and why.
+Reference to specification document and acceptance criteria.
+
+- Specific changes made
+- Tests added or updated
+- Documentation updates
+
+Addresses: spec/phases/phase{N}-{name}.md section X.Y
+```
+
+### Quality Gates for Phase Development
+- All tests must pass before merging
+- Code coverage maintained or improved for each phase
+- Documentation updated for user-facing changes
+- Specification documents kept current with implementation
+- Performance regressions identified and addressed
