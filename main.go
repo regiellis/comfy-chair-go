@@ -417,7 +417,7 @@ func updateComfyUI() {
 					return
 				}
 				fmt.Println(internal.SuccessStyle.Render("Changes stashed. Retrying update..."))
-				_, err2 := executeCommand("git", []string{"pull", "origin", "master"}, comfyDir, "", false)
+				_, err2 := internal.ExecuteCommand("git", []string{"pull", "origin", "master"}, comfyDir, "", false)
 				if err2 != nil {
 					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Git pull still failed: %v", err2)))
 					return
@@ -434,7 +434,7 @@ func updateComfyUI() {
 				_ = form2.Run()
 				if popStash {
 					fmt.Println(internal.InfoStyle.Render("Applying stashed changes..."))
-					_, popErr := executeCommand("git", []string{"stash", "pop"}, comfyDir, "", false)
+					_, popErr := internal.ExecuteCommand("git", []string{"stash", "pop"}, comfyDir, "", false)
 					if popErr != nil {
 						fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to pop stash: %v", popErr)))
 					} else {
@@ -467,7 +467,7 @@ func updateComfyUI() {
 	uvPath, err := exec.LookPath("uv")
 	if err == nil {
 		args := []string{"pip", "install", "-r", reqTxt}
-		_, err = executeCommand(uvPath, args, comfyDir, "", false)
+		_, err = internal.ExecuteCommand(uvPath, args, comfyDir, "", false)
 		if err != nil {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update dependencies (uv pip install): %v", err)))
 			return
@@ -478,7 +478,7 @@ func updateComfyUI() {
 	}
 	// Fallback to venvPython if uv is not found
 	args := []string{"pip", "install", "-r", reqTxt}
-	_, err = executeCommand(venvPython, args, comfyDir, "", false)
+	_, err = internal.ExecuteCommand(venvPython, args, comfyDir, "", false)
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update dependencies (pip install): %v", err)))
 		return
@@ -487,10 +487,8 @@ func updateComfyUI() {
 	internal.PromptReturnToMenu()
 }
 
-func installComfyUI() {
-	fmt.Println(internal.TitleStyle.Render("ComfyUI Installation / Reconfiguration"))
-
-	// 1. Prompt for environment type
+// promptEnvironmentType prompts the user to select an environment type
+func promptEnvironmentType() (string, error) {
 	var envType string
 	formEnv := huh.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().
@@ -503,24 +501,58 @@ func installComfyUI() {
 			).
 			Value(&envType),
 	)).WithTheme(huh.ThemeCharm())
-	_ = formEnv.Run()
+	
+	if err := formEnv.Run(); err != nil {
+		return "", fmt.Errorf("failed to get environment type: %w", err)
+	}
+	
 	if envType == "" {
+		return "", fmt.Errorf("no environment type selected")
+	}
+	
+	return envType, nil
+}
+
+// promptInstallationPath prompts the user to enter an installation path
+func promptInstallationPath() (string, error) {
+	var installPath string
+	formPath := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Enter the full desired path for your ComfyUI installation").Value(&installPath),
+	)).WithTheme(huh.ThemeCharm())
+	
+	if err := formPath.Run(); err != nil {
+		return "", fmt.Errorf("failed to get installation path: %w", err)
+	}
+	
+	installPath = strings.TrimSpace(installPath)
+	if installPath == "" {
+		return "", fmt.Errorf("installation path cannot be empty")
+	}
+	
+	installPath, err := filepath.Abs(installPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to get absolute path: %w", err)
+	}
+	
+	return installPath, nil
+}
+
+func installComfyUI() {
+	fmt.Println(internal.TitleStyle.Render("ComfyUI Installation / Reconfiguration"))
+
+	// 1. Prompt for environment type
+	envType, err := promptEnvironmentType()
+	if err != nil {
 		fmt.Println(internal.InfoStyle.Render("Installation cancelled."))
 		return
 	}
 
 	// 2. Prompt for install path
-	var installPath string
-	formPath := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Enter the full desired path for your ComfyUI installation").Value(&installPath),
-	)).WithTheme(huh.ThemeCharm())
-	_ = formPath.Run()
-	installPath = strings.TrimSpace(installPath)
-	if installPath == "" {
-		fmt.Println(internal.ErrorStyle.Render("Installation path cannot be empty."))
+	installPath, err := promptInstallationPath()
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(err.Error()))
 		return
 	}
-	installPath, _ = filepath.Abs(installPath)
 
 	// Prompt for GPU_TYPE and PYTHON_VERSION if not set in .env
 	envVars, _ := internal.ReadEnvFile(appPaths.EnvFile)
@@ -679,7 +711,7 @@ func installComfyUI() {
 		fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Using detected system Python: %s", systemPythonExec)))
 	}
 
-	installPath, err := filepath.Abs(strings.TrimSpace(installPath))
+	installPath = filepath.Clean(strings.TrimSpace(installPath))
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Invalid installation path %s: %v", installPath, err)))
 		return
@@ -722,7 +754,7 @@ func installComfyUI() {
 				return
 			}
 			// Directory is empty, can proceed with clone
-			if errClone := internal.CloneComfyUI(comfyRepo, installPath, executeCommand); errClone != nil {
+			if errClone := internal.CloneComfyUI(comfyRepo, installPath, internal.ExecuteCommand); errClone != nil {
 				return
 			}
 		}
@@ -737,7 +769,7 @@ func installComfyUI() {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to create directory %s: %v", installPath, errMkdir)))
 			return
 		}
-		if errClone := internal.CloneComfyUI(comfyRepo, installPath, executeCommand); errClone != nil {
+		if errClone := internal.CloneComfyUI(comfyRepo, installPath, internal.ExecuteCommand); errClone != nil {
 			return
 		}
 	}
@@ -760,7 +792,7 @@ func installComfyUI() {
 	if uvErr == nil {
 		fmt.Println(internal.InfoStyle.Render("Using 'uv venv' to create virtual environment..."))
 		venvArgs := []string{"venv", "--relocatable", "--python", "3.12", "--python-preference", "only-managed", currentInstallVenvPath}
-		_, errCmd := executeCommand(uvPath, venvArgs, installPath, "", false)
+		_, errCmd := internal.ExecuteCommand(uvPath, venvArgs, installPath, "", false)
 		if errCmd != nil {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("'uv venv' failed: %v. Falling back to python -m venv...", errCmd)))
 		} else {
@@ -770,7 +802,7 @@ func installComfyUI() {
 	}
 	if !venvCreated {
 		fmt.Println(internal.InfoStyle.Render("Using 'python -m venv' to create virtual environment..."))
-		_, errCmd := executeCommand(systemPythonExec, []string{"-m", "venv", currentInstallVenvPath}, installPath, "", false)
+		_, errCmd := internal.ExecuteCommand(systemPythonExec, []string{"-m", "venv", currentInstallVenvPath}, installPath, "", false)
 		if errCmd != nil {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to create virtual environment: %v", errCmd)))
 			fmt.Println(internal.InfoStyle.Render("Please ensure your system Python can create virtual environments (e.g., `python -m venv test-venv` works)."))
@@ -889,113 +921,12 @@ func installComfyUI() {
 	fmt.Println(internal.InfoStyle.Render("To make it active, use the 'set active' or 'set_working_env' command. The .env file was NOT changed."))
 }
 
-// executeCommand runs a command, optionally in the background.
-func executeCommand(commandName string, args []string, workDir string, logFilePath string, inBackground bool) (*os.Process, error) {
-	// Basic validation: command name should not be empty and should not contain path separators unless it's an absolute path
-	if commandName == "" {
-		return nil, fmt.Errorf("command name cannot be empty")
-	}
-	
-	// Validate working directory if provided
-	if workDir != "" {
-		cleanWorkDir := filepath.Clean(internal.ExpandUserPath(workDir))
-		// Ensure the work directory exists or is creatable
-		if _, err := os.Stat(cleanWorkDir); err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("invalid working directory: %w", err)
-		}
-	}
-	
-	cmd := exec.Command(commandName, args...)
-	if workDir != "" {
-		cmd.Dir = internal.ExpandUserPath(workDir)
-	}
-
-	if inBackground {
-		if logFilePath == "" {
-			return nil, fmt.Errorf("logFilePath cannot be empty for background commands")
-		}
-		logFile, err := os.OpenFile(internal.ExpandUserPath(logFilePath), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open log file %s: %w", logFilePath, err)
-		}
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
-
-		// Call the platform-specific function to configure SysProcAttr
-		configureCmdSysProcAttr(cmd)
-
-		err = cmd.Start()
-		if err != nil {
-			logFile.Close() // Close file if Start fails.
-			return nil, fmt.Errorf("failed to start command '%s %s' in background: %w", commandName, strings.Join(args, " "), err)
-		}
-		
-		// Start a goroutine to monitor the process and close the file when it exits
-		go func() {
-			defer logFile.Close()
-			_ = cmd.Wait() // Wait for the process to exit, then close the log file
-		}()
-		
-		return cmd.Process, nil
-	}
-
-	// Foreground execution
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin // Allow interaction
-
-	err := cmd.Run() // Waits for completion
-	if err != nil {
-		return nil, fmt.Errorf("command '%s %s' execution failed: %w", commandName, strings.Join(args, " "), err)
-	}
-	return cmd.Process, nil
-}
-
-// readPID reads the process ID from the pidFile.
-func readPID() (int, error) {
-	if _, err := os.Stat(internal.ExpandUserPath(appPaths.PidFile)); os.IsNotExist(err) {
-		return 0, os.ErrNotExist // Return specific error
-	}
-	data, err := os.ReadFile(internal.ExpandUserPath(appPaths.PidFile))
-	if err != nil {
-		return 0, err
-	}
-	if len(data) == 0 {
-		return 0, fmt.Errorf("pid file is empty: %s", appPaths.PidFile)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, fmt.Errorf("invalid PID in file %s: %w", appPaths.PidFile, err)
-	}
-	return pid, nil
-}
-
-// cleanupPIDFile removes the pidFile.
-func cleanupPIDFile() {
-	if err := os.Remove(internal.ExpandUserPath(appPaths.PidFile)); err != nil && !os.IsNotExist(err) {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Failed to remove PID file %s: %v", appPaths.PidFile, err)))
-	}
-}
 
 
 
 
-// getRunningPID reads PID from file and checks if the process is running.
-func getRunningPID() (pid int, isRunning bool) {
-	pidRead, err := readPID()
-	if err != nil {
-		// os.ErrNotExist is normal if ComfyUI not started via this tool's background mode.
-		// Other errors (permission, corrupted file) are warnings.
-		if !errors.Is(err, os.ErrNotExist) {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Could not read PID file %s: %v", appPaths.PidFile, err)))
-		}
-		return 0, false
-	}
-	if internal.IsProcessRunning(pidRead) {
-		return pidRead, true
-	}
-	return pidRead, false // PID read, but process not running (stale PID)
-}
+
+
 
 
 

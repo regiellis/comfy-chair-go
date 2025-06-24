@@ -190,7 +190,7 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 		}
 	}()
 
-	pid, _ := readPID()
+	pid, _ := internal.ReadPID(appPaths.PidFile)
 	if !internal.IsProcessRunning(pid) {
 		fmt.Println(internal.SuccessStyle.Render("Starting ComfyUI..."))
 		startComfyUI(true)
@@ -362,7 +362,7 @@ func matchesExtension(filePath string, exts []string) bool {
 }
 
 func restartComfyUIProcess() {
-	pid, isRunning := getRunningPID()
+	pid, isRunning := internal.GetRunningPID(appPaths.PidFile)
 	if isRunning {
 		process, err := os.FindProcess(pid)
 		if err == nil {
@@ -398,10 +398,10 @@ func restartComfyUIProcess() {
 		} else {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Could not find process to kill (PID: %d): %v", pid, err)))
 		}
-		cleanupPIDFile()
+		internal.CleanupPIDFile(appPaths.PidFile)
 	} else if pid != 0 { // Stale PID file
 		fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Removing stale PID file for PID %d.", pid)))
-		cleanupPIDFile()
+		internal.CleanupPIDFile(appPaths.PidFile)
 	}
 	startComfyUI(true)
 }
