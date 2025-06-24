@@ -1,0 +1,63 @@
+target_language: "Go v1.22+"
+
+coding_guidelines:
+  introduction: |
+    These coding guidelines are intended as a supportive framework to encourage clear, maintainable, and secure code.
+    They are not strict rules—use them as a reference, adapting as needed to
+    suit your project's context, goals, and team preferences.
+    
+    When a guideline does not fit a particular situation, prioritize clarity, correctness, and the intent of the
+    user or team. Open communication and thoughtful collaboration are always encouraged.
+
+  general:
+    - Consider preserving user modifications to files; when unsure, it may help to check with the user before making changes.
+    - Aim to write code that is clear, maintainable, and idiomatic for the target language.
+    - Try to follow established style guides and project conventions (naming, indentation, formatting) where they exist.
+    - Use descriptive and meaningful names for variables, functions, classes, and modules when possible.
+    - Where appropriate, keep functions, classes, and modules focused to avoid unnecessary complexity.
+    - If a task is large, consider breaking it into smaller, single-purpose units.
+    - Strive to maintain backward compatibility and avoid breaking existing features or APIs, unless there is a good reason and the team is informed.
+    - When in doubt about style or conventions, it can be helpful to ask for clarification.
+
+  comments:
+    - Add comments for non-obvious, tricky, or complex logic if you think it will help others understand.
+    - Avoid commenting code that is already self-explanatory.
+    - Use comments to clarify intent, edge cases, or workarounds where you feel it adds value.
+    - You may use TODO comments to highlight incomplete sections or known issues.
+
+  documentation:
+    - Where helpful, provide or update documentation for public-facing functions, classes, modules, or APIs.
+    - Use standard documentation templates if your project or team prefers them.
+    - Try to keep documentation concise, clear, and relevant.
+    - Consider including usage examples if you think they would benefit users.
+
+  communication:
+    - If requirements or instructions seem ambiguous, consider seeking clarification.
+    - When information is missing or unclear, asking targeted questions can help avoid misunderstandings.
+    - If you make assumptions, it’s often helpful to state them explicitly.
+    - When facing uncertain implementation details, you might propose options and invite feedback.
+    - If you notice potential issues or edge cases, highlighting them and asking for guidance can be valuable.
+    - Whenever something does not make sense, don’t hesitate to ask questions.
+
+  security:
+    - Where relevant, validate and sanitize user inputs and external data.
+    - Consider escaping or parameterizing inputs to help prevent injection attacks (e.g., SQL injection, XSS).
+    - Try not to expose sensitive information in code, logs, or error messages.
+    - Use secure methods for storing and handling credentials, tokens, and secrets when possible.
+    - Applying the principle of least privilege for database and file access is generally a good practice.
+    - When executing user-supplied code, sandboxing or input restrictions can be helpful.
+    - Handle errors and exceptions in a way that avoids leaking stack traces or internal details.
+    - Prefer well-maintained libraries for cryptography, authentication, and authorization, if available.
+    - Regularly reviewing and updating dependencies can help address known vulnerabilities.
+
+  checklist:
+    - Code is generally clear, idiomatic, and well-structured.
+    - Comments are present for tricky or non-obvious logic where helpful.
+    - Documentation is concise and uses standard templates if appropriate.
+    - Questions are asked when requirements are unclear or missing.
+    - Assumptions and edge cases are communicated as needed.
+    - Security best practices are considered for input validation, data handling, and access control.
+    - Existing features and functions are not broken without good reason.
+    - Existing functions are reused where it makes sense.
+    - The user's or team's programming style is considered.
+    - Clarifying questions are asked when unsure.
