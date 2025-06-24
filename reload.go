@@ -60,7 +60,7 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 	}()
 
 	pid, _ := readPID()
-	if !isProcessRunning(pid) {
+	if !internal.IsProcessRunning(pid) {
 		fmt.Println(internal.SuccessStyle.Render("Starting ComfyUI..."))
 		startComfyUI(true)
 		// Give it a moment to start
@@ -185,12 +185,12 @@ func restartComfyUIProcess() {
 			waited := 0
 			for waited < 20 { // Wait up to 2 seconds (20 * 100ms)
 				time.Sleep(100 * time.Millisecond)
-				if !isProcessRunning(pid) {
+				if !internal.IsProcessRunning(pid) {
 					break
 				}
 				waited++
 			}
-			if isProcessRunning(pid) {
+			if internal.IsProcessRunning(pid) {
 				if isWindows() {
 					process.Kill()
 				} else {
@@ -200,7 +200,7 @@ func restartComfyUIProcess() {
 				// Short delay to ensure process is fully terminated
 				for i := 0; i < 10; i++ {
 					time.Sleep(100 * time.Millisecond)
-					if !isProcessRunning(pid) {
+					if !internal.IsProcessRunning(pid) {
 						break
 					}
 				}

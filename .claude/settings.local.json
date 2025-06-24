@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(go build:*)",
+      "Bash(rm:*)",
+      "Bash(task build)",
+      "Bash(./comfy-chair --help)",
+      "Bash(git add:*)"
+    ],
+    "deny": []
+  }
+}

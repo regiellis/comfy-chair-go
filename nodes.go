@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -233,14 +234,7 @@ func createNewNode() {
 		inst := cfg.FindDefaultInstall()
 		if inst != nil {
 			// Only add if not already present
-			found := false
-			for _, n := range inst.CustomNodes {
-				if n == nodeName {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if !slices.Contains(inst.CustomNodes, nodeName) {
 				inst.CustomNodes = append(inst.CustomNodes, nodeName)
 				_ = internal.SaveGlobalConfig(cfg)
 			}
@@ -269,7 +263,7 @@ func listCustomNodes() {
 
 	// Parse active nodes from comfy-installs.json
 	activeNodes := map[string]bool{}
-	if inst, err := getActiveComfyInstall(); err == nil && inst != nil {
+	if inst, err := internal.GetActiveComfyInstall(); err == nil && inst != nil {
 		for _, d := range inst.ReloadIncludeDirs {
 			activeNodes[d] = true
 		}
@@ -820,14 +814,7 @@ func addOrRemoveNodeWorkflows() {
 		if wfs, ok := tracking[nodeName]; ok {
 			newWfs := []string{}
 			for _, wf := range wfs {
-				found := false
-				for _, sel := range selected {
-					if wf == sel {
-						found = true
-						break
-					}
-				}
-				if !found {
+				if !slices.Contains(selected, wf) {
 					newWfs = append(newWfs, wf)
 				}
 			}
