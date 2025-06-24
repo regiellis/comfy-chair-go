@@ -207,6 +207,7 @@ func showOtherToolsMenu() string {
 				Options(
 					huh.NewOption("Install/Upgrade pip in Environment", "upgrade_pip"),
 					huh.NewOption("Performance Monitoring", "performance"),
+					huh.NewOption("Health & Diagnostics", "health"),
 					huh.NewOption("Back", "back"),
 				).
 				Value(&toolChoice),
@@ -219,6 +220,8 @@ func showOtherToolsMenu() string {
 			handleUpgradePip()
 		} else if toolChoice == "performance" {
 			ShowPerformanceMenu()
+		} else if toolChoice == "health" {
+			ShowHealthMenu()
 		}
 	}
 }
