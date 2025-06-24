@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -16,6 +17,136 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/regiellis/comfyui-chair-go/internal"
 )
+
+// Common patterns to ignore during file watching
+var commonIgnorePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`__pycache__`),
+	regexp.MustCompile(`\.pyc$`),
+	regexp.MustCompile(`\.pyo$`),
+	regexp.MustCompile(`\.pyd$`),
+	regexp.MustCompile(`\.so$`),
+	regexp.MustCompile(`\.egg-info`),
+	regexp.MustCompile(`\.git`),
+	regexp.MustCompile(`\.DS_Store$`),
+	regexp.MustCompile(`Thumbs\.db$`),
+	regexp.MustCompile(`\.swp$`),
+	regexp.MustCompile(`\.tmp$`),
+	regexp.MustCompile(`\.log$`),
+	regexp.MustCompile(`\.pid$`),
+	regexp.MustCompile(`node_modules`),
+	regexp.MustCompile(`\.vscode`),
+	regexp.MustCompile(`\.idea`),
+	regexp.MustCompile(`dist/`),
+	regexp.MustCompile(`build/`),
+}
+
+// shouldIgnorePath checks if a path should be ignored based on common patterns and .gitignore files
+func shouldIgnorePath(path string, basePath string) bool {
+	// Get relative path for pattern matching
+	relPath, err := filepath.Rel(basePath, path)
+	if err != nil {
+		relPath = path
+	}
+	
+	// Check against common ignore patterns
+	for _, pattern := range commonIgnorePatterns {
+		if pattern.MatchString(relPath) || pattern.MatchString(filepath.Base(path)) {
+			return true
+		}
+	}
+	
+	// Check for .gitignore in the directory and parent directories
+	return checkGitignore(path, basePath)
+}
+
+// checkGitignore reads .gitignore files and checks if path should be ignored
+func checkGitignore(targetPath string, basePath string) bool {
+	// Start from the target path directory and walk up to basePath
+	currentDir := filepath.Dir(targetPath)
+	for {
+		gitignorePath := filepath.Join(currentDir, ".gitignore")
+		if _, err := os.Stat(gitignorePath); err == nil {
+			if isIgnoredByGitignore(targetPath, gitignorePath, currentDir) {
+				return true
+			}
+		}
+		
+		// Stop if we've reached the base path or root
+		if currentDir == basePath || currentDir == filepath.Dir(currentDir) {
+			break
+		}
+		currentDir = filepath.Dir(currentDir)
+	}
+	return false
+}
+
+// isIgnoredByGitignore checks if a path matches patterns in a .gitignore file
+func isIgnoredByGitignore(targetPath string, gitignorePath string, gitignoreDir string) bool {
+	file, err := os.Open(gitignorePath)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	
+	// Get relative path from gitignore directory
+	relPath, err := filepath.Rel(gitignoreDir, targetPath)
+	if err != nil {
+		return false
+	}
+	
+	// Convert to forward slashes for pattern matching
+	relPath = filepath.ToSlash(relPath)
+	
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		
+		// Handle negation patterns (starting with !)
+		isNegation := strings.HasPrefix(line, "!")
+		if isNegation {
+			line = line[1:]
+		}
+		
+		// Convert gitignore pattern to regex
+		pattern := gitignorePatternToRegex(line)
+		matched, err := regexp.MatchString(pattern, relPath)
+		if err == nil && matched {
+			// If it's a negation pattern and matches, don't ignore
+			if isNegation {
+				return false
+			}
+			// Otherwise, ignore it
+			return true
+		}
+	}
+	return false
+}
+
+// gitignorePatternToRegex converts a gitignore pattern to a regular expression
+func gitignorePatternToRegex(pattern string) string {
+	// Escape special regex characters except * and ?
+	pattern = regexp.MustCompile(`[.+^${}()|\[\]\\]`).ReplaceAllStringFunc(pattern, func(s string) string {
+		return "\\" + s
+	})
+	
+	// Convert gitignore wildcards to regex
+	pattern = strings.ReplaceAll(pattern, "*", "[^/]*")
+	pattern = strings.ReplaceAll(pattern, "?", "[^/]")
+	
+	// Handle directory patterns (ending with /)
+	if strings.HasSuffix(pattern, "/") {
+		pattern = pattern[:len(pattern)-1] + "(/.*)?$"
+	} else {
+		pattern = "^" + pattern + "$"
+	}
+	
+	return pattern
+}
 
 // NOTE: includedDirs is now sourced from comfy-installs.json (per environment) via main.go, not from .env.
 func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, includedDirs []string) {
@@ -103,11 +234,20 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 			continue
 		}
 		
-		// Recursively add all subdirectories to the watcher
+		// Recursively add all subdirectories to the watcher, respecting .gitignore
 		err = filepath.Walk(watchPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Error walking directory %s: %v", path, err)))
 				return nil // Continue walking despite errors
+			}
+			
+			// Check if this path should be ignored
+			if shouldIgnorePath(path, watchDir) {
+				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Skipping ignored path: %s", strings.TrimPrefix(path, watchDir+string(filepath.Separator)))))
+				if info.IsDir() {
+					return filepath.SkipDir // Skip entire directory
+				}
+				return nil
 			}
 			
 			if info.IsDir() {
@@ -116,7 +256,7 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to watch directory %s: %v", path, err)))
 				} else {
 					dirsWatched++
-					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Watching directory: %s", path)))
+					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Watching directory: %s", strings.TrimPrefix(path, watchDir+string(filepath.Separator)))))
 				}
 			}
 			return nil
@@ -162,6 +302,12 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return
+			}
+			
+			// Check if this file should be ignored
+			if shouldIgnorePath(event.Name, watchDir) {
+				// Silently ignore files that match ignore patterns
+				continue
 			}
 			
 			// Log all file events for debugging
