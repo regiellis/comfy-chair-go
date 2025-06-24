@@ -1,0 +1,5 @@
+# API Node Dependencies
+requests>=2.28.0
+aiohttp>=3.8.0
+asyncio
+# Add your API integration dependencies here

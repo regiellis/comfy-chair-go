@@ -59,6 +59,7 @@ type MenuChoices struct {
 	Status             MenuAction
 	SyncEnv            func() error
 	SetWorkingEnv      func()
+	Performance        func()
 }
 
 // ShowMainMenu displays the main menu loop and handles navigation
@@ -205,6 +206,7 @@ func showOtherToolsMenu() string {
 				Title("Other Tools").
 				Options(
 					huh.NewOption("Install/Upgrade pip in Environment", "upgrade_pip"),
+					huh.NewOption("Performance Monitoring", "performance"),
 					huh.NewOption("Back", "back"),
 				).
 				Value(&toolChoice),
@@ -215,6 +217,8 @@ func showOtherToolsMenu() string {
 		}
 		if toolChoice == "upgrade_pip" {
 			handleUpgradePip()
+		} else if toolChoice == "performance" {
+			ShowPerformanceMenu()
 		}
 	}
 }

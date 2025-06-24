@@ -332,10 +332,55 @@ func startComfyUI(background bool) {
 	}
 
 	args := []string{"-s", mainPy, "--listen", "--port", fmt.Sprintf("%d", chosenPort), "--preview-method", "auto", "--front-end-version", "Comfy-Org/ComfyUI_frontend@latest"}
-	process, err := internal.ExecuteCommand(venvPython, args, comfyDir, logFile, background)
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to start ComfyUI: %v", err)))
-		return
+	
+	// Measure startup time if running in background
+	var startupTime time.Duration
+	var process *os.Process
+	if background {
+		startTime := time.Now()
+		var err error
+		process, err = internal.ExecuteCommand(venvPython, args, comfyDir, logFile, background)
+		if err != nil {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to start ComfyUI: %v", err)))
+			return
+		}
+		startupTime = time.Since(startTime)
+		
+		// Record performance metric
+		inst, _ := internal.GetActiveComfyInstall()
+		envType := "unknown"
+		if inst != nil {
+			envType = string(inst.Type)
+		}
+		
+		// Wait a bit for the process to fully initialize
+		time.Sleep(3 * time.Second)
+		
+		memUsage, _ := internal.GetCurrentMemoryUsage(process.Pid)
+		customNodesPath := filepath.Join(comfyDir, "custom_nodes")
+		nodeCount := internal.CountCustomNodes(customNodesPath)
+		logSize := internal.GetLogSize(logFile)
+		
+		metric := internal.PerformanceMetric{
+			Timestamp:       time.Now(),
+			Environment:     envType,
+			StartupTime:     startupTime,
+			MemoryUsageMB:   memUsage,
+			ProcessID:       process.Pid,
+			Port:            chosenPort,
+			LogSizeMB:       logSize,
+			CustomNodeCount: nodeCount,
+		}
+		
+		// Record the metric (ignore errors to not interrupt startup)
+		_ = internal.RecordPerformanceMetric(metric)
+	} else {
+		var err error
+		process, err = internal.ExecuteCommand(venvPython, args, comfyDir, logFile, background)
+		if err != nil {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to start ComfyUI: %v", err)))
+			return
+		}
 	}
 	if background && process != nil {
 		err := internal.WritePIDForEnv(process.Pid, pidFile)
