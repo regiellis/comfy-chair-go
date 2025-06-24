@@ -134,3 +134,10 @@ The `internal/` package contains reusable modules:
 - Use `internal.FunctionName()` calls from main.go and other files
 - Keep menu and CLI routing logic in main.go
 - Move reusable business logic to internal packages
+
+### User Experience Improvements (v1.3.2+)
+- **Robust Environment Handling**: Graceful error handling when environment configurations are missing or invalid
+- **Clear User Guidance**: Specific instructions on how to fix configuration issues through the UI
+- **Consistent Menu Navigation**: All operations now include "Return to Main Menu" prompts after completion
+- **Non-blocking Failures**: Configuration errors don't cause hard exits, users can navigate to Install/Setup options
+- **Better Error Messages**: Informative error messages that guide users to solutions rather than just reporting failures

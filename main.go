@@ -506,6 +506,7 @@ func updateComfyUI() {
 			return
 		}
 		fmt.Println(internal.SuccessStyle.Render("ComfyUI and dependencies updated successfully."))
+		internal.PromptReturnToMenu()
 		return
 	}
 	// Fallback to venvPython if uv is not found
@@ -516,6 +517,7 @@ func updateComfyUI() {
 		return
 	}
 	fmt.Println(internal.SuccessStyle.Render("ComfyUI and dependencies updated successfully."))
+	internal.PromptReturnToMenu()
 }
 
 func installComfyUI() {
