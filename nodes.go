@@ -21,7 +21,7 @@ import (
 	"github.com/regiellis/comfyui-chair-go/internal"
 )
 
-//go:embed all:templates/node
+//go:embed all:templates
 var nodeTemplateFS embed.FS
 
 // placeholderRegex for efficient placeholder removal
@@ -49,8 +49,18 @@ func NewZipWriter(f *os.File) *zip.Writer {
 	return zip.NewWriter(f)
 }
 
-func copyNodeTemplate(dstDir string, values map[string]string) error {
-	templateRoot := "templates/node"
+func copyNodeTemplate(dstDir string, values map[string]string, templateType string) error {
+	var templateRoot string
+	switch templateType {
+	case "advanced":
+		templateRoot = "templates/advanced-node"
+	case "api":
+		templateRoot = "templates/api-node"
+	case "model":
+		templateRoot = "templates/model-node"
+	default:
+		templateRoot = "templates/node"
+	}
 	return fs.WalkDir(nodeTemplateFS, templateRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -133,6 +143,25 @@ func createNewNode() {
 	authorDefault := envVars["CUSTOM_NODES_AUTHOR"]
 	pubidDefault := envVars["CUSTOM_NODES_PUBID"]
 
+	// Prompt for template type first
+	var templateType string
+	templateForm := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().
+			Title("Select Node Template").
+			Description("Choose the type of node to create:").
+			Options(
+				huh.NewOption("Basic Node - Simple node with standard functionality", "basic"),
+				huh.NewOption("Advanced Node - Rich UI components and settings", "advanced"),
+				huh.NewOption("API Node - Focused on API integrations", "api"),
+				huh.NewOption("Model Loader Node - For loading and managing ML models", "model"),
+			).
+			Value(&templateType),
+	)).WithTheme(huh.ThemeCharm())
+	if internal.HandleFormError(templateForm.Run(), "Template selection") {
+		internal.PromptReturnToMenu()
+		return
+	}
+
 	// Prompt for node name, author, pubid
 	var nodeName, author, pubid string
 	author = authorDefault
@@ -201,7 +230,7 @@ func createNewNode() {
 		}
 	}
 
-	if err := copyNodeTemplate(nodeDir, values); err != nil {
+	if err := copyNodeTemplate(nodeDir, values, templateType); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to scaffold node: %v", err)))
 		return
 	}
