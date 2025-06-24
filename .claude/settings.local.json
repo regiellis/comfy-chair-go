@@ -10,7 +10,10 @@
       "Bash(git commit:*)",
       "Bash(git tag:*)",
       "Bash(git push:*)",
-      "Bash(./comfy-chair help)"
+      "Bash(./comfy-chair help)",
+      "mcp__ide__getDiagnostics",
+      "Bash(mkdir:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": []
   }
