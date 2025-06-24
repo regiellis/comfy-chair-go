@@ -112,6 +112,7 @@ func createNewNode() {
 	fmt.Println(internal.TitleStyle.Render("Create New ComfyUI Node (Scaffold)"))
 	if !appPaths.IsConfigured {
 		fmt.Println(internal.ErrorStyle.Render("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' first."))
+		internal.PromptReturnToMenu()
 		return
 	}
 
@@ -130,6 +131,7 @@ func createNewNode() {
 		huh.NewInput().Title("PubID").Value(&pubid).Placeholder("Your PubID"),
 	)).WithTheme(huh.ThemeCharm())
 	if internal.HandleFormError(form.Run(), "Node creation") {
+		internal.PromptReturnToMenu()
 		return
 	}
 	if nodeName == "" {
@@ -240,12 +242,14 @@ func createNewNode() {
 			}
 		}
 	}
+	internal.PromptReturnToMenu()
 }
 
 func listCustomNodes() {
 	fmt.Println(internal.TitleStyle.Render("List Custom Nodes"))
 	if !appPaths.IsConfigured {
 		fmt.Println(internal.ErrorStyle.Render("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' first."))
+		internal.PromptReturnToMenu()
 		return
 	}
 
@@ -335,12 +339,14 @@ func listCustomNodes() {
 	} else {
 		fmt.Println(internal.WarningStyle.Render("README.md not found for this node."))
 	}
+	internal.PromptReturnToMenu()
 }
 
 func deleteCustomNode() {
 	fmt.Println(internal.TitleStyle.Render("Delete Custom Node"))
 	if !appPaths.IsConfigured {
 		fmt.Println(internal.ErrorStyle.Render("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' first."))
+		internal.PromptReturnToMenu()
 		return
 	}
 
@@ -424,12 +430,14 @@ func deleteCustomNode() {
 			_ = internal.SaveGlobalConfig(cfg)
 		}
 	}
+	internal.PromptReturnToMenu()
 }
 
 func packNode() {
 	fmt.Println(internal.TitleStyle.Render("Pack Custom Node"))
 	if !appPaths.IsConfigured {
 		fmt.Println(internal.ErrorStyle.Render("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' first."))
+		internal.PromptReturnToMenu()
 		return
 	}
 
@@ -522,6 +530,7 @@ func updateCustomNodes() {
 	fmt.Println(internal.TitleStyle.Render("Update Custom Node(s)"))
 	if !appPaths.IsConfigured {
 		fmt.Println(internal.ErrorStyle.Render("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' first."))
+		internal.PromptReturnToMenu()
 		return
 	}
 
@@ -668,6 +677,7 @@ func addOrRemoveNodeWorkflows() {
 	fmt.Println(internal.TitleStyle.Render("Add/Remove Custom Node Workflows in Main Workflows Folder"))
 	if !appPaths.IsConfigured {
 		fmt.Println(internal.ErrorStyle.Render("ComfyUI path is not configured. Please run 'Install/Reconfigure ComfyUI' first."))
+		internal.PromptReturnToMenu()
 		return
 	}
 

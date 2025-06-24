@@ -6,7 +6,11 @@
       "Bash(rm:*)",
       "Bash(task build)",
       "Bash(./comfy-chair --help)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)",
+      "Bash(./comfy-chair help)"
     ],
     "deny": []
   }
