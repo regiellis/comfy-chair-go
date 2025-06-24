@@ -281,41 +281,7 @@ func initPaths() error {
 	return nil
 }
 
-// saveComfyUIPathToEnv saves the COMFYUI_PATH to the .env file.
-func saveComfyUIPathToEnv(comfyPath string) error {
-	absComfyPath, err := filepath.Abs(comfyPath)
-	if err != nil {
-		return fmt.Errorf("could not get absolute path for ComfyUI: %w", err)
-	}
 
-	envMap := make(map[string]string)
-	// Read existing .env if it exists, to preserve other variables
-	if _, err := os.Stat(internal.ExpandUserPath(appPaths.EnvFile)); err == nil {
-		existingEnv, readErr := godotenv.Read(appPaths.EnvFile)
-		if readErr != nil {
-			// Log warning but proceed to overwrite if unreadable
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: failed to read existing .env file at %s, it might be corrupted: %v", appPaths.EnvFile, readErr)))
-		} else {
-			envMap = existingEnv
-		}
-	}
-
-	// Always write without quotes
-	envMap[internal.ComfyUIPathKey] = internal.ExpandUserPath(absComfyPath)
-	return godotenv.Write(envMap, appPaths.EnvFile)
-}
-
-// checkVenvPython ensures the virtual environment's Python executable exists.
-func checkVenvPython(comfyDir string) error {
-	if comfyDir == "" {
-		return fmt.Errorf("ComfyUI path is not configured")
-	}
-	_, err := internal.FindVenvPython(internal.ExpandUserPath(comfyDir))
-	if err != nil {
-		return fmt.Errorf("python executable not found in 'venv' or '.venv' under %s. Please ensure ComfyUI is installed correctly and the venv is set up (e.g., via the 'Install/Reconfigure' option)", comfyDir)
-	}
-	return nil
-}
 
 func startComfyUI(background bool) {
 	inst, err := internal.GetActiveComfyInstall()
@@ -442,7 +408,8 @@ func updateComfyUI() {
 				),
 			).WithTheme(huh.ThemeCharm())
 			_ = form.Run()
-			if action == "stash" {
+			switch action {
+			case "stash":
 				fmt.Println(internal.InfoStyle.Render("Stashing local changes..."))
 				_, stashErr := internal.ExecuteCommand("git", []string{"stash"}, comfyDir, "", false)
 				if stashErr != nil {
@@ -476,10 +443,10 @@ func updateComfyUI() {
 				} else {
 					fmt.Println(internal.InfoStyle.Render("You can apply your stashed changes later with 'git stash pop' in your ComfyUI directory."))
 				}
-			} else if action == "abort" {
+			case "abort":
 				fmt.Println(internal.InfoStyle.Render("Update aborted. No changes made."))
 				return
-			} else {
+			default:
 				fmt.Println(internal.InfoStyle.Render("Please resolve the git issue in your ComfyUI directory, then retry the update."))
 				return
 			}
@@ -1010,71 +977,7 @@ func cleanupPIDFile() {
 	}
 }
 
-// Cache management methods
-func (pc *processCache) cleanupStaleEntries() {
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	
-	now := time.Now()
-	// Clean up every 5 minutes
-	if time.Since(pc.lastCleanup) < 5*time.Minute {
-		return
-	}
-	
-	// Remove entries older than 30 seconds
-	for pid, status := range pc.cache {
-		if time.Since(status.lastCheck) > 30*time.Second {
-			delete(pc.cache, pid)
-		}
-	}
-	pc.lastCleanup = now
-}
 
-func (pc *processCache) getCachedStatus(pid int) (processStatus, bool) {
-	pc.mu.RLock()
-	defer pc.mu.RUnlock()
-	
-	status, exists := pc.cache[pid]
-	return status, exists
-}
-
-func (pc *processCache) updateCache(pid int, isRunning bool) {
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	
-	pc.cache[pid] = processStatus{
-		isRunning: isRunning,
-		lastCheck: time.Now(),
-	}
-}
-
-// isProcessRunningReal performs the actual system check without caching
-func isProcessRunningReal(pid int) bool {
-	if pid == 0 {
-		return false
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil { // Should not happen on POSIX if pid != 0, can happen on Windows.
-		return false
-	}
-
-	if runtime.GOOS == "windows" {
-		// On Windows, FindProcess always returns a Process object.
-		// Sending signal 0 doesn't work. tasklist is more reliable.
-		cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH") // No Header
-		output, err := cmd.Output()
-		if err != nil { // tasklist command failed or process not found (often an error)
-			return false
-		}
-		return strings.Contains(strings.ToLower(string(output)), strings.ToLower(strconv.Itoa(pid))) // Case-insensitive check for PID
-	}
-
-	// For POSIX systems, send signal 0 to check if the process exists and is owned by us.
-	if err := process.Signal(syscall.Signal(0)); err != nil {
-		return false // Process doesn't exist or we don't have permission
-	}
-	return true
-}
 
 
 // getRunningPID reads PID from file and checks if the process is running.
