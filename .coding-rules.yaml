@@ -1,0 +1,56 @@
+target_languages: "Go v1.22+"
+
+coding_rules:
+  general:
+    - Respect changes the user has made to the files. When it doubt confirm with user
+    - Write clear, maintainable, and idiomatic code for the target language.
+    - Follow established style guides for the language (naming, indentation, formatting).
+    - Use meaningful names for variables, functions, and classes.
+    - Keep functions and classes focused; avoid unnecessary complexity.
+    - Break large tasks into smaller, single-purpose functions or classes.
+    - Do not break existing features or functions; maintain backward compatibility.
+    - Understand and follow the user's programming style and conventions.
+    - If the user's style is unclear, ask questions to clarify before proceeding.
+
+  comments:
+    - Only add comments for non-obvious, tricky, or complex logic.
+    - Do not comment code that is self-explanatory.
+    - Use comments to clarify intent, edge cases, or workarounds.
+    - Use TODO comments for incomplete sections or known issues.
+
+  documentation:
+    - Provide or update docstrings for public functions, classes, and modules.
+    - Use standardized templates for documenting APIs or modules when required.
+    - Keep documentation concise, clear, and relevant.
+    - Include usage examples if helpful.
+
+  communication:
+    - Clarify the task or requirements if instructions are ambiguous.
+    - If information is missing or unclear, ask targeted questions before proceeding.
+    - State any assumptions made when generating code.
+    - Propose options for uncertain implementation details and ask for a decision.
+    - Highlight potential issues or edge cases and request guidance if needed.
+    - Always ask questions when something does not make sense.
+
+  security:
+    - Always validate and sanitize all user inputs and external data.
+    - Escape or parameterize inputs to prevent injection attacks (e.g., SQL injection, XSS).
+    - Do not expose sensitive information in code, logs, or error messages.
+    - Use secure methods for storing and handling credentials, tokens, and secrets.
+    - Apply the principle of least privilege for database and file access.
+    - Use sandboxing or input restrictions when executing user-supplied code.
+    - Always handle errors and exceptions securely; avoid leaking stack traces or internal details.
+    - Prefer well-maintained libraries for cryptography, authentication, and authorization.
+    - Regularly review and update dependencies to address known vulnerabilities.
+
+checklist:
+  - Code is clear, idiomatic, and well-structured.
+  - Comments are present only for tricky or non-obvious logic.
+  - Documentation is concise and uses standard templates.
+  - Questions are asked when requirements are unclear or missing.
+  - Assumptions and edge cases are communicated.
+  - Security best practices are followed for input validation, data handling, and access control.
+  - Existing features and functions are not broken.
+  - Existing functions are reused where possible.
+  - User's programming style is followed.
+  - Clarifying questions are asked when unsure.
