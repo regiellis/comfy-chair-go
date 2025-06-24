@@ -1,6 +1,6 @@
 import typing
 
-class Node:
+class {{NodeName}}:
     """
     Example ComfyUI Custom Node
 

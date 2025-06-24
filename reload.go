@@ -73,13 +73,16 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 	}
 	defer watcher.Close()
 
-	// Add only includedDirs to the watcher (opt-in)
+	// Add only includedDirs to the watcher (opt-in), recursively
+	dirsWatched := 0
 	for _, dir := range includedDirs {
 		watchPath := filepath.Join(watchDir, dir)
 		info, err := os.Lstat(watchPath)
 		if err != nil {
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Cannot access directory %s: %v", watchPath, err)))
 			continue
 		}
+		
 		// If it's a symlink, resolve it and ensure it's a directory
 		if info.Mode()&os.ModeSymlink != 0 {
 			realPath, err := filepath.EvalSymlinks(watchPath)
@@ -94,16 +97,42 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 			}
 			watchPath = realPath
 		}
+		
 		if !info.IsDir() {
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Path %s is not a directory, skipping", watchPath)))
 			continue
 		}
-		err = watcher.Add(watchPath)
+		
+		// Recursively add all subdirectories to the watcher
+		err = filepath.Walk(watchPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Error walking directory %s: %v", path, err)))
+				return nil // Continue walking despite errors
+			}
+			
+			if info.IsDir() {
+				err = watcher.Add(path)
+				if err != nil {
+					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to watch directory %s: %v", path, err)))
+				} else {
+					dirsWatched++
+					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Watching directory: %s", path)))
+				}
+			}
+			return nil
+		})
+		
 		if err != nil {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to watch directory %s: %v", watchPath, err)))
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to setup recursive watching for %s: %v", watchPath, err)))
 		}
 	}
+	
+	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Total directories being watched: %d", dirsWatched)))
 
 	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Watching %s for changes...", watchDir)))
+	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Watching file extensions: %v", exts)))
+	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Watching custom node directories: %v", includedDirs)))
+	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Debounce period: %d seconds", debounceSeconds)))
 	lastRestartTime := time.Now()
 	debounceDuration := time.Duration(debounceSeconds) * time.Second
 
@@ -134,7 +163,12 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 			if !ok {
 				return
 			}
-			// Debug logging removed to prevent path leakage
+			
+			// Log all file events for debugging
+			fileName := filepath.Base(event.Name)
+			relativePath := strings.TrimPrefix(event.Name, watchDir+string(filepath.Separator))
+			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("File event: %s on %s (op: %s)", event.Op, relativePath, event.Op)))
+			
 			// Only trigger reload if the event is in an includedDir
 			inIncluded := false
 			for _, dir := range includedDirs {
@@ -143,19 +177,25 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 					break
 				}
 			}
+			
 			if !inIncluded {
-				// File change ignored - not in watched directories
+				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("File change ignored - %s not in watched custom node directories", relativePath)))
 				continue
 			}
+			
 			matched := matchesExtension(event.Name, exts)
+			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Extension check: %s matches %v = %t", fileName, exts, matched)))
+			
 			if (event.Op.Has(fsnotify.Write) || event.Op.Has(fsnotify.Create)) && matched {
 				if time.Since(lastRestartTime) > debounceDuration {
-					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", event.Name)))
+					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", relativePath)))
 					restartComfyUIProcess()
 					lastRestartTime = time.Now()
 				} else {
-					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Change detected in %s, but debouncing...", event.Name)))
+					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Change detected in %s, but debouncing... (%.1fs remaining)", relativePath, debounceDuration.Seconds()-time.Since(lastRestartTime).Seconds())))
 				}
+			} else if !matched {
+				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("File change ignored - %s does not match watched extensions %v", fileName, exts)))
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {

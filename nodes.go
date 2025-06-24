@@ -55,20 +55,32 @@ func copyNodeTemplate(dstDir string, values map[string]string) error {
 		if err != nil {
 			return err
 		}
-		relPath := strings.TrimPrefix(path, templateRoot+"/")
-		if relPath == "" {
+		
+		// Skip the root template directory itself
+		if path == templateRoot {
 			return nil
 		}
-		dstPath := filepath.Join(dstDir, relPath)
-		if d.IsDir() {
-			return os.MkdirAll(dstPath, 0755)
+		
+		// Calculate relative path from template root
+		relPath := strings.TrimPrefix(path, templateRoot+"/")
+		if relPath == "" || relPath == path {
+			// This shouldn't happen, but skip if we can't get a proper relative path
+			return nil
 		}
-		// For files with placeholders in the name
+		
+		dstPath := filepath.Join(dstDir, relPath)
+		
+		// For files/directories with placeholders in the name
 		for k, v := range values {
 			if strings.Contains(dstPath, k) {
 				dstPath = strings.ReplaceAll(dstPath, k, v)
 			}
 		}
+		
+		if d.IsDir() {
+			return os.MkdirAll(dstPath, 0755)
+		}
+		
 		data, err := nodeTemplateFS.ReadFile(path)
 		if err != nil {
 			return err
@@ -156,9 +168,12 @@ func createNewNode() {
 		return
 	}
 
+	// Create Python-safe class name (replace hyphens with underscores)
+	pythonSafeNodeName := strings.ReplaceAll(nodeName, "-", "_")
+	
 	values := map[string]string{
-		internal.NodeNamePlaceholder:      nodeName,
-		internal.NodeNameLowerPlaceholder: strings.ToLower(nodeName),
+		internal.NodeNamePlaceholder:      pythonSafeNodeName,
+		internal.NodeNameLowerPlaceholder: strings.ToLower(pythonSafeNodeName),
 		internal.NodeDescPlaceholder:      "",
 		internal.AuthorPlaceholder:        author,
 		"{{License}}":                     "",
