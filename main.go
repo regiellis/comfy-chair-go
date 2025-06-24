@@ -318,7 +318,7 @@ func checkVenvPython(comfyDir string) error {
 }
 
 func startComfyUI(background bool) {
-	inst, err := getActiveComfyInstall()
+	inst, err := internal.GetActiveComfyInstall()
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(err.Error()))
 		return
@@ -340,13 +340,13 @@ func startComfyUI(background bool) {
 	}
 	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Starting ComfyUI from %s in the %s...", comfyDir, action)))
 
-	if pid, isRunning := getRunningPIDForEnv(pidFile); isRunning {
+	if pid, isRunning := internal.GetRunningPIDForEnv(pidFile); isRunning {
 		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("ComfyUI is already running (PID: %d).", pid)))
 		return
 	}
 	if _, err := os.Stat(internal.ExpandUserPath(pidFile)); err == nil {
-		pidFromFile, _ := readPIDForEnv(pidFile)
-		if pidFromFile != 0 && !isProcessRunning(pidFromFile) {
+		pidFromFile, _ := internal.ReadPIDForEnv(pidFile)
+		if pidFromFile != 0 && !internal.IsProcessRunning(pidFromFile) {
 			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Removing stale PID file for PID %d.", pidFromFile)))
 			os.Remove(internal.ExpandUserPath(pidFile))
 		}
@@ -366,13 +366,13 @@ func startComfyUI(background bool) {
 	}
 
 	args := []string{"-s", mainPy, "--listen", "--port", fmt.Sprintf("%d", chosenPort), "--preview-method", "auto", "--front-end-version", "Comfy-Org/ComfyUI_frontend@latest"}
-	process, err := executeCommand(venvPython, args, comfyDir, logFile, background)
+	process, err := internal.ExecuteCommand(venvPython, args, comfyDir, logFile, background)
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to start ComfyUI: %v", err)))
 		return
 	}
 	if background && process != nil {
-		err := writePIDForEnv(process.Pid, pidFile)
+		err := internal.WritePIDForEnv(process.Pid, pidFile)
 		if err != nil {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to write PID file: %v (path: %s)", err, pidFile)))
 			process.Kill()
@@ -399,7 +399,7 @@ func startComfyUI(background bool) {
 }
 
 func updateComfyUI() {
-	inst, err := getActiveComfyInstall()
+	inst, err := internal.GetActiveComfyInstall()
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(err.Error()))
 		return
@@ -412,7 +412,7 @@ func updateComfyUI() {
 	}
 	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Updating ComfyUI at %s...", comfyDir)))
 	fmt.Println(internal.InfoStyle.Render("Pulling latest changes from Git..."))
-	pullOut, err := executeCommand("git", []string{"pull", "origin", "master"}, comfyDir, "", false)
+	pullOut, err := internal.ExecuteCommand("git", []string{"pull", "origin", "master"}, comfyDir, "", false)
 	if err != nil {
 		pullOutput := ""
 		if pullOut != nil {
@@ -444,7 +444,7 @@ func updateComfyUI() {
 			_ = form.Run()
 			if action == "stash" {
 				fmt.Println(internal.InfoStyle.Render("Stashing local changes..."))
-				_, stashErr := executeCommand("git", []string{"stash"}, comfyDir, "", false)
+				_, stashErr := internal.ExecuteCommand("git", []string{"stash"}, comfyDir, "", false)
 				if stashErr != nil {
 					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to stash changes: %v", stashErr)))
 					return
@@ -1074,28 +1074,6 @@ func isProcessRunningReal(pid int) bool {
 	return true
 }
 
-// isProcessRunning checks if a process with the given PID is currently running (with caching).
-func isProcessRunning(pid int) bool {
-	if pid == 0 {
-		return false
-	}
-
-	// Clean up stale entries periodically
-	procCache.cleanupStaleEntries()
-
-	// Check cache first
-	if status, exists := procCache.getCachedStatus(pid); exists {
-		// Use cached result if it's fresh (within 5 seconds)
-		if time.Since(status.lastCheck) < 5*time.Second {
-			return status.isRunning
-		}
-	}
-
-	// Cache miss or stale - check for real and update cache
-	isRunning := isProcessRunningReal(pid)
-	procCache.updateCache(pid, isRunning)
-	return isRunning
-}
 
 // getRunningPID reads PID from file and checks if the process is running.
 func getRunningPID() (pid int, isRunning bool) {
@@ -1108,41 +1086,14 @@ func getRunningPID() (pid int, isRunning bool) {
 		}
 		return 0, false
 	}
-	if isProcessRunning(pidRead) {
+	if internal.IsProcessRunning(pidRead) {
 		return pidRead, true
 	}
 	return pidRead, false // PID read, but process not running (stale PID)
 }
 
-// getRunningPIDForEnv reads PID from a given pidFile and checks if the process is running.
-func getRunningPIDForEnv(pidFile string) (pid int, isRunning bool) {
-	pid, _ = readPIDForEnv(pidFile)
-	isRunning = isProcessRunning(pid)
-	return
-}
 
-// readPIDForEnv reads the PID from a given pidFile.
-func readPIDForEnv(pidFile string) (int, error) {
-	f, err := os.Open(internal.ExpandUserPath(pidFile))
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-	var pid int
-	fmt.Fscanf(f, "%d", &pid)
-	return pid, nil
-}
 
-// writePIDForEnv writes the PID to a given pidFile.
-func writePIDForEnv(pid int, pidFile string) error {
-	f, err := os.Create(internal.ExpandUserPath(pidFile))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = fmt.Fprintf(f, "%d", pid)
-	return err
-}
 
 func removeEnv() {
 	// Prompt for environment to remove
@@ -1238,22 +1189,22 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "start", "start_fg", "start-fg":
-			runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, false) })
+			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, false) })
 			return
 		case "background", "start_bg", "start-bg":
-			runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, true) })
+			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, true) })
 			return
 		case "stop":
-			runWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) })
 			return
 		case "restart":
-			runWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) })
 			return
 		case "update":
-			runWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) })
 			return
 		case "reload":
-			inst, err := getActiveComfyInstall()
+			inst, err := internal.GetActiveComfyInstall()
 			if err != nil {
 				fmt.Println(internal.ErrorStyle.Render(err.Error()))
 				return
@@ -1304,7 +1255,7 @@ func main() {
 			installComfyUI()
 			return
 		case "status":
-			runWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) })
 			return
 		case "update-nodes":
 			updateCustomNodes()
@@ -1463,10 +1414,11 @@ func main() {
 					)).WithTheme(huh.ThemeCharm())
 					_ = form.Run()
 					if toolChoice == "back" || toolChoice == "" {
+						choice = ""
 						break toolsMenu
 					}
 					if toolChoice == "upgrade_pip" {
-						inst, err := getActiveComfyInstall()
+						inst, err := internal.GetActiveComfyInstall()
 						if err != nil {
 							fmt.Println(internal.ErrorStyle.Render(err.Error()))
 							continue
@@ -1507,18 +1459,18 @@ func main() {
 
 		switch choice {
 		case "start_fg":
-			runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, false) })
+			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, false) })
 		case "start_bg":
-			runWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, true) })
+			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, true) })
 			os.Exit(0)
 		case "stop":
-			runWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) })
 			os.Exit(0)
 		case "restart":
-			runWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) })
 			os.Exit(0)
 		case "update":
-			runWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) })
 			os.Exit(0)
 		case "install":
 			installComfyUI()
@@ -1532,7 +1484,7 @@ func main() {
 		case "pack_node":
 			packNode()
 		case "reload":
-			inst, err := getActiveComfyInstall()
+			inst, err := internal.GetActiveComfyInstall()
 			if err != nil {
 				fmt.Println(internal.ErrorStyle.Render(err.Error()))
 				return
@@ -1579,9 +1531,9 @@ func main() {
 			}
 			reloadComfyUI(watchDir, debounce, exts, includedDirs)
 		case "status":
-			runWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) })
 		case "watch_nodes":
-			inst, err := getActiveComfyInstall()
+			inst, err := internal.GetActiveComfyInstall()
 			if err != nil {
 				fmt.Println(internal.ErrorStyle.Render(err.Error()))
 				os.Exit(1)
@@ -1703,26 +1655,6 @@ func main() {
 	}
 }
 
-// getActiveComfyInstall returns the currently active ComfyInstall (default or selected)
-func getActiveComfyInstall() (*internal.ComfyInstall, error) {
-	cfg, err := internal.LoadGlobalConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load global config: %w", err)
-	}
-	workingEnv := os.Getenv(internal.WorkingComfyEnvKey)
-	if workingEnv != "" {
-		inst := cfg.FindInstallByType(internal.InstallType(workingEnv))
-		if inst != nil {
-			return inst, nil
-		}
-	}
-
-	inst := cfg.FindDefaultInstall()
-	if inst == nil {
-		return nil, fmt.Errorf("no default environment set in comfy-installs.json")
-	}
-	return inst, nil
-}
 
 // waitForComfyUIReady waits for ComfyUI to be ready by checking the log file for a specific string.
 func waitForComfyUIReady() error {
@@ -1753,54 +1685,13 @@ func waitForComfyUIStop(pid int) error {
 		if time.Since(startTime) > maxWaitTime {
 			return fmt.Errorf("timeout waiting for ComfyUI to stop")
 		}
-		if !isProcessRunning(pid) {
+		if !internal.IsProcessRunning(pid) {
 			return nil
 		}
 		time.Sleep(1 * time.Second)
 	}
 }
 
-// runWithEnvConfirmation prompts for environment confirmation and runs the given action with the selected environment.
-func runWithEnvConfirmation(action string, fn func(inst *internal.ComfyInstall)) {
-	cfg, err := internal.LoadGlobalConfig()
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render("Failed to load global config: " + err.Error()))
-		return
-	}
-	workingEnv := os.Getenv(internal.WorkingComfyEnvKey)
-	if workingEnv != "" {
-		inst := cfg.FindInstallByType(internal.InstallType(workingEnv))
-		if inst != nil {
-			fn(inst)
-			return
-		}
-	}
-	inst := cfg.FindDefaultInstall()
-	if len(cfg.Installs) > 1 && workingEnv == "" {
-		var envOptions []huh.Option[string]
-		for _, i := range cfg.Installs {
-			label := string(i.Type)
-			if i.Name != "" && i.Name != string(i.Type) {
-				label += " - " + i.Name
-			}
-			if i.IsDefault {
-				label += " (default)"
-			}
-			envOptions = append(envOptions, huh.NewOption(label, string(i.Type)))
-		}
-		var selected string
-		form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Select environment for '" + action + "':").Options(envOptions...).Value(&selected))).WithTheme(huh.ThemeCharm())
-		_ = form.Run()
-		if selected != "" {
-			inst = cfg.FindInstallByType(internal.InstallType(selected))
-		}
-	}
-	if inst == nil {
-		fmt.Println(internal.ErrorStyle.Render("No environment selected or found."))
-		return
-	}
-	fn(inst)
-}
 
 // startComfyUIWithEnv starts ComfyUI for the given environment, foreground/background.
 func startComfyUIWithEnv(inst *internal.ComfyInstall, background bool) {
@@ -1824,7 +1715,7 @@ func stopComfyUIWithEnv(inst *internal.ComfyInstall) {
 	appPaths.ComfyUIDir = inst.Path
 	defer func() { appPaths.ComfyUIDir = oldDir }()
 	pidFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "comfyui.pid"))
-	if pid, isRunning := getRunningPIDForEnv(pidFile); isRunning {
+	if pid, isRunning := internal.GetRunningPIDForEnv(pidFile); isRunning {
 		process, err := os.FindProcess(pid)
 		if err == nil {
 			if runtime.GOOS == "windows" {
@@ -1855,7 +1746,7 @@ func statusComfyUIWithEnv(inst *internal.ComfyInstall) {
 	defer func() { appPaths.ComfyUIDir = oldDir }()
 	pidFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "comfyui.pid"))
 	logFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "comfyui.log"))
-	pid, isRunning := getRunningPIDForEnv(pidFile)
+	pid, isRunning := internal.GetRunningPIDForEnv(pidFile)
 
 	// Gather log info
 	logSize := "(not found)"
@@ -1871,10 +1762,7 @@ func statusComfyUIWithEnv(inst *internal.ComfyInstall) {
 				lines = append(lines, scanner.Text())
 			}
 			if len(lines) > 0 {
-				start := len(lines) - 5
-				if start < 0 {
-					start = 0
-				}
+				start := max(0, len(lines)-5)
 				lastLines = lines[start:]
 			}
 		}

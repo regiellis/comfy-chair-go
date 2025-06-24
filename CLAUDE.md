@@ -24,12 +24,14 @@ The project does not appear to have a formal test suite currently. Any new testi
 
 ### Core Components
 
-- **main.go** - Entry point with CLI command routing and ComfyUI process management
+- **main.go** - Entry point with CLI command routing and menu system
 - **nodes.go** - Custom node creation, templating, and management functionality
 - **reload.go** - File system watching and auto-restart functionality for development
 - **internal/utils.go** - Shared utilities, configuration management, and path handling
 - **internal/install.go** - ComfyUI installation and setup logic
 - **internal/setup.go** - Environment configuration and .env management
+- **internal/core.go** - Core functions for environment management and active install detection
+- **internal/process.go** - Process management, PID tracking, and command execution utilities
 
 ### Key Concepts
 
@@ -64,9 +66,10 @@ Key Go modules:
 - Graceful fallbacks for missing configurations
 
 ### Process Management
-- PID file tracking for ComfyUI processes
+- PID file tracking for ComfyUI processes implemented in `internal/process.go`
+- Process status caching to reduce system calls
+- Cross-platform process detection (Windows/Unix)
 - Port conflict detection and resolution
-- Cross-platform process attribute handling
 
 ### Template Processing
 - Embedded filesystem for node templates
@@ -114,3 +117,20 @@ Key Go modules:
 - Virtual environments must be named `venv` or `.venv`
 - Templates use `{{NodeName}}` and `{{NodeNameLower}}` placeholders
 - Configuration files are stored alongside the binary executable
+
+## Code Organization
+
+### Internal Package Structure
+The `internal/` package contains reusable modules:
+- **core.go** - Environment management functions (`GetActiveComfyInstall`, `RunWithEnvConfirmation`)
+- **process.go** - Process lifecycle management and PID tracking
+- **utils.go** - Path handling, styling utilities, and shared helpers
+- **install.go** - ComfyUI installation and setup logic
+- **setup.go** - Environment configuration and .env management
+- **constants.go** - Application constants and configuration keys
+
+### Refactoring Guidelines
+- Extract commonly used functions to appropriate internal modules
+- Use `internal.FunctionName()` calls from main.go and other files
+- Keep menu and CLI routing logic in main.go
+- Move reusable business logic to internal packages
