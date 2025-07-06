@@ -170,7 +170,42 @@ func ExpandUserPath(path string) string {
 			path = strings.ReplaceAll(path, "{USERPROFILE}", userProfile)
 		}
 	}
-	return filepath.Clean(path)
+	
+	// Clean the path and validate it doesn't contain traversal sequences
+	cleanPath := filepath.Clean(path)
+	
+	// Check for path traversal attempts after expansion
+	if containsPathTraversal(cleanPath) {
+		// Return empty string for invalid paths - callers should check for this
+		return ""
+	}
+	
+	return cleanPath
+}
+
+// containsPathTraversal checks if a path contains directory traversal sequences
+func containsPathTraversal(path string) bool {
+	// After cleaning, check if path tries to go above allowed directories
+	// Split path and check for any ".." components that weren't resolved
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	for _, part := range parts {
+		if part == ".." {
+			return true
+		}
+	}
+	
+	// Additional check for absolute paths trying to access system directories
+	if runtime.GOOS != "windows" {
+		// On Unix-like systems, check for attempts to access sensitive system paths
+		dangerousPaths := []string{"/etc", "/sys", "/proc", "/dev", "/root"}
+		for _, dangerous := range dangerousPaths {
+			if strings.HasPrefix(path, dangerous) {
+				return true
+			}
+		}
+	}
+	
+	return false
 }
 
 // ReadEnvFile reads a .env file and returns its key-value pairs.

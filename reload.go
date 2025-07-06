@@ -124,6 +124,13 @@ func isIgnoredByGitignore(targetPath string, gitignorePath string, gitignoreDir 
 			return true
 		}
 	}
+	
+	// Check for scanner errors
+	if err := scanner.Err(); err != nil {
+		// Log error but don't fail - treat as not ignored
+		fmt.Fprintf(os.Stderr, "Warning: error reading .gitignore file: %v\n", err)
+	}
+	
 	return false
 }
 

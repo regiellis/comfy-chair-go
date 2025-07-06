@@ -40,9 +40,24 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 		return nil, fmt.Errorf("command name cannot be empty")
 	}
 	
+	// Validate command name to prevent command injection
+	if err := validateCommand(commandName); err != nil {
+		return nil, fmt.Errorf("invalid command: %w", err)
+	}
+	
+	// Validate all arguments
+	for i, arg := range args {
+		if err := validateArgument(arg); err != nil {
+			return nil, fmt.Errorf("invalid argument at position %d: %w", i, err)
+		}
+	}
+	
 	// Validate working directory if provided
 	if workDir != "" {
 		cleanWorkDir := filepath.Clean(ExpandUserPath(workDir))
+		if cleanWorkDir == "" {
+			return nil, fmt.Errorf("invalid working directory path")
+		}
 		// Ensure the work directory exists or is creatable
 		if _, err := os.Stat(cleanWorkDir); err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("working directory validation failed: %w", err)
@@ -56,7 +71,11 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 
 	// Handle logging and I/O redirection
 	if logFilePath != "" && inBackground {
-		logFile, err := os.OpenFile(ExpandUserPath(logFilePath), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		expandedLogPath := ExpandUserPath(logFilePath)
+		if expandedLogPath == "" {
+			return nil, fmt.Errorf("invalid log file path")
+		}
+		logFile, err := os.OpenFile(expandedLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open log file %s: %w", logFilePath, err)
 		}
@@ -83,8 +102,9 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 		}
 		
 		// Wait for the process to complete (this allows Ctrl+C to work properly)
-		_ = cmd.Wait()
-		return cmd.Process, nil
+		waitErr := cmd.Wait()
+		// Return the process even if Wait failed - the process did run
+		return cmd.Process, waitErr
 	}
 }
 
@@ -167,12 +187,35 @@ func isProcessRunningReal(pid int) bool {
 	if runtime.GOOS == "windows" {
 		// On Windows, FindProcess always returns a Process object.
 		// Sending signal 0 doesn't work. tasklist is more reliable.
-		cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH") // No Header
+		cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV") // No Header, CSV format
 		output, err := cmd.Output()
 		if err != nil { // tasklist command failed or process not found (often an error)
 			return false
 		}
-		return strings.Contains(strings.ToLower(string(output)), strings.ToLower(strconv.Itoa(pid))) // Case-insensitive check for PID
+		
+		// Parse CSV output to check for exact PID match
+		// CSV format: "process.exe","PID","Session Name","Session#","Mem Usage"
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			
+			// Split CSV fields
+			fields := strings.Split(line, ",")
+			if len(fields) >= 2 {
+				// Extract PID field (second field) and remove quotes
+				pidField := strings.Trim(fields[1], "\"")
+				pidField = strings.TrimSpace(pidField)
+				
+				// Check for exact match
+				if pidField == strconv.Itoa(pid) {
+					return true
+				}
+			}
+		}
+		return false
 	}
 
 	// For POSIX systems, send signal 0 to check if the process exists and is owned by us.
@@ -231,23 +274,91 @@ func GetRunningPIDForEnv(pidFile string) (pid int, isRunning bool) {
 
 // ReadPIDForEnv reads the PID from a given pidFile.
 func ReadPIDForEnv(pidFile string) (int, error) {
-	f, err := os.Open(ExpandUserPath(pidFile))
+	expandedPath := ExpandUserPath(pidFile)
+	if expandedPath == "" {
+		return 0, fmt.Errorf("invalid PID file path")
+	}
+	f, err := os.Open(expandedPath)
 	if err != nil {
 		return 0, err
 	}
 	defer f.Close()
 	var pid int
-	fmt.Fscanf(f, "%d", &pid)
+	n, err := fmt.Fscanf(f, "%d", &pid)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read PID from file: %w", err)
+	}
+	if n != 1 {
+		return 0, fmt.Errorf("invalid PID format in file")
+	}
+	if pid <= 0 {
+		return 0, fmt.Errorf("invalid PID value: %d", pid)
+	}
 	return pid, nil
 }
 
 // WritePIDForEnv writes the PID to a given pidFile.
 func WritePIDForEnv(pid int, pidFile string) error {
-	f, err := os.Create(ExpandUserPath(pidFile))
+	expandedPath := ExpandUserPath(pidFile)
+	if expandedPath == "" {
+		return fmt.Errorf("invalid PID file path")
+	}
+	f, err := os.Create(expandedPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	_, err = fmt.Fprintf(f, "%d", pid)
 	return err
+}
+
+// validateCommand validates a command name to prevent command injection
+func validateCommand(cmd string) error {
+	// Allow absolute paths or simple command names
+	if filepath.IsAbs(cmd) {
+		// For absolute paths, verify the file exists and is executable
+		info, err := os.Stat(cmd)
+		if err != nil {
+			return fmt.Errorf("command not found: %s", cmd)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("command path is a directory: %s", cmd)
+		}
+		// Check if executable (Unix-style permissions check)
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 {
+			return fmt.Errorf("file is not executable: %s", cmd)
+		}
+	} else {
+		// For relative commands, ensure they don't contain dangerous characters
+		// that could be used for command injection
+		dangerousChars := []string{";", "&", "|", "`", "$", "(", ")", "{", "}", "<", ">", "\n", "\r"}
+		for _, char := range dangerousChars {
+			if strings.Contains(cmd, char) {
+				return fmt.Errorf("command contains dangerous character: %s", char)
+			}
+		}
+		
+		// Don't allow path traversal in command names
+		if strings.Contains(cmd, "..") {
+			return fmt.Errorf("command contains path traversal sequence")
+		}
+	}
+	
+	return nil
+}
+
+// validateArgument validates command arguments to prevent injection
+func validateArgument(arg string) error {
+	// Arguments can contain most characters, but we should prevent
+	// null bytes and newlines that could break command parsing
+	if strings.Contains(arg, "\x00") {
+		return fmt.Errorf("argument contains null byte")
+	}
+	
+	// Very long arguments could indicate an attack
+	if len(arg) > 8192 {
+		return fmt.Errorf("argument too long (max 8192 characters)")
+	}
+	
+	return nil
 }

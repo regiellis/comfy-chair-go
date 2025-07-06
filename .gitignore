@@ -41,3 +41,5 @@ Thumbs.db
 comfyui.log
 comfyui.pid
 comfy-installs.json
+comfy-performance-history.json
+.claude
