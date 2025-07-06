@@ -95,6 +95,12 @@ func copyNodeTemplate(dstDir string, values map[string]string, templateType stri
 		if err != nil {
 			return err
 		}
+		
+		// Ensure parent directory exists
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			return err
+		}
+		
 		content := replacePlaceholders(string(data), values)
 		return os.WriteFile(dstPath, []byte(content), 0644)
 	})
@@ -258,6 +264,12 @@ func createNewNode() {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to remove existing node '%s': %v", nodeName, err)))
 			return
 		}
+	}
+
+	// Create the node directory
+	if err := os.MkdirAll(nodeDir, 0755); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to create node directory: %v", err)))
+		return
 	}
 
 	if err := copyNodeTemplate(nodeDir, values, templateType); err != nil {
