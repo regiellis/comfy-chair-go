@@ -21,7 +21,7 @@ import (
 	"github.com/regiellis/comfyui-chair-go/internal"
 )
 
-//go:embed all:templates/node
+//go:embed all:templates
 var nodeTemplateFS embed.FS
 
 // placeholderRegex for efficient placeholder removal
@@ -49,26 +49,48 @@ func NewZipWriter(f *os.File) *zip.Writer {
 	return zip.NewWriter(f)
 }
 
-func copyNodeTemplate(dstDir string, values map[string]string) error {
-	templateRoot := "templates/node"
+func copyNodeTemplate(dstDir string, values map[string]string, templateType string) error {
+	var templateRoot string
+	switch templateType {
+	case "advanced":
+		templateRoot = "templates/advanced-node"
+	case "api":
+		templateRoot = "templates/api-node"
+	case "model":
+		templateRoot = "templates/model-node"
+	default:
+		templateRoot = "templates/node"
+	}
 	return fs.WalkDir(nodeTemplateFS, templateRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		relPath := strings.TrimPrefix(path, templateRoot+"/")
-		if relPath == "" {
+		
+		// Skip the root template directory itself
+		if path == templateRoot {
 			return nil
 		}
-		dstPath := filepath.Join(dstDir, relPath)
-		if d.IsDir() {
-			return os.MkdirAll(dstPath, 0755)
+		
+		// Calculate relative path from template root
+		relPath := strings.TrimPrefix(path, templateRoot+"/")
+		if relPath == "" || relPath == path {
+			// This shouldn't happen, but skip if we can't get a proper relative path
+			return nil
 		}
-		// For files with placeholders in the name
+		
+		dstPath := filepath.Join(dstDir, relPath)
+		
+		// For files/directories with placeholders in the name
 		for k, v := range values {
 			if strings.Contains(dstPath, k) {
 				dstPath = strings.ReplaceAll(dstPath, k, v)
 			}
 		}
+		
+		if d.IsDir() {
+			return os.MkdirAll(dstPath, 0755)
+		}
+		
 		data, err := nodeTemplateFS.ReadFile(path)
 		if err != nil {
 			return err
@@ -80,7 +102,28 @@ func copyNodeTemplate(dstDir string, values map[string]string) error {
 
 // input sanitization and validation for node creation
 func sanitizeNodeInput(input string) string {
-	return strings.TrimSpace(strings.ReplaceAll(input, " ", "_"))
+	// Trim whitespace
+	input = strings.TrimSpace(input)
+	
+	// Remove or replace dangerous characters
+	// Replace spaces with underscores
+	input = strings.ReplaceAll(input, " ", "_")
+	
+	// Remove all path-related characters and other dangerous chars
+	dangerousChars := []string{"..", "/", "\\", ":", "*", "?", "\"", "<", ">", "|", "\n", "\r", "\t", "\x00"}
+	for _, char := range dangerousChars {
+		input = strings.ReplaceAll(input, char, "")
+	}
+	
+	// Keep only alphanumeric, underscore, and hyphen
+	var sanitized strings.Builder
+	for _, r := range input {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			sanitized.WriteRune(r)
+		}
+	}
+	
+	return sanitized.String()
 }
 
 func isValidNodeName(name string) bool {
@@ -121,6 +164,25 @@ func createNewNode() {
 	authorDefault := envVars["CUSTOM_NODES_AUTHOR"]
 	pubidDefault := envVars["CUSTOM_NODES_PUBID"]
 
+	// Prompt for template type first
+	var templateType string
+	templateForm := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().
+			Title("Select Node Template").
+			Description("Choose the type of node to create:").
+			Options(
+				huh.NewOption("Basic Node - Simple node with standard functionality", "basic"),
+				huh.NewOption("Advanced Node - Rich UI components and settings", "advanced"),
+				huh.NewOption("API Node - Focused on API integrations", "api"),
+				huh.NewOption("Model Loader Node - For loading and managing ML models", "model"),
+			).
+			Value(&templateType),
+	)).WithTheme(huh.ThemeCharm())
+	if internal.HandleFormError(templateForm.Run(), "Template selection") {
+		internal.PromptReturnToMenu()
+		return
+	}
+
 	// Prompt for node name, author, pubid
 	var nodeName, author, pubid string
 	author = authorDefault
@@ -146,7 +208,16 @@ func createNewNode() {
 	}
 
 	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, internal.CustomNodesDir))
+	if customNodesDir == "" {
+		fmt.Println(internal.ErrorStyle.Render("Invalid ComfyUI path detected. Please check your configuration."))
+		return
+	}
+	
 	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
+	if nodeDir == "" {
+		fmt.Println(internal.ErrorStyle.Render("Invalid node directory path. Node creation cancelled for security reasons."))
+		return
+	}
 	
 	// Additional security check: ensure nodeDir is within customNodesDir
 	cleanCustomNodesDir := filepath.Clean(customNodesDir)
@@ -156,9 +227,12 @@ func createNewNode() {
 		return
 	}
 
+	// Create Python-safe class name (replace hyphens with underscores)
+	pythonSafeNodeName := strings.ReplaceAll(nodeName, "-", "_")
+	
 	values := map[string]string{
-		internal.NodeNamePlaceholder:      nodeName,
-		internal.NodeNameLowerPlaceholder: strings.ToLower(nodeName),
+		internal.NodeNamePlaceholder:      pythonSafeNodeName,
+		internal.NodeNameLowerPlaceholder: strings.ToLower(pythonSafeNodeName),
 		internal.NodeDescPlaceholder:      "",
 		internal.AuthorPlaceholder:        author,
 		"{{License}}":                     "",
@@ -186,7 +260,7 @@ func createNewNode() {
 		}
 	}
 
-	if err := copyNodeTemplate(nodeDir, values); err != nil {
+	if err := copyNodeTemplate(nodeDir, values, templateType); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to scaffold node: %v", err)))
 		return
 	}
