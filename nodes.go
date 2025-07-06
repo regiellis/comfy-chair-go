@@ -102,7 +102,28 @@ func copyNodeTemplate(dstDir string, values map[string]string, templateType stri
 
 // input sanitization and validation for node creation
 func sanitizeNodeInput(input string) string {
-	return strings.TrimSpace(strings.ReplaceAll(input, " ", "_"))
+	// Trim whitespace
+	input = strings.TrimSpace(input)
+	
+	// Remove or replace dangerous characters
+	// Replace spaces with underscores
+	input = strings.ReplaceAll(input, " ", "_")
+	
+	// Remove all path-related characters and other dangerous chars
+	dangerousChars := []string{"..", "/", "\\", ":", "*", "?", "\"", "<", ">", "|", "\n", "\r", "\t", "\x00"}
+	for _, char := range dangerousChars {
+		input = strings.ReplaceAll(input, char, "")
+	}
+	
+	// Keep only alphanumeric, underscore, and hyphen
+	var sanitized strings.Builder
+	for _, r := range input {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			sanitized.WriteRune(r)
+		}
+	}
+	
+	return sanitized.String()
 }
 
 func isValidNodeName(name string) bool {
@@ -187,7 +208,16 @@ func createNewNode() {
 	}
 
 	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, internal.CustomNodesDir))
+	if customNodesDir == "" {
+		fmt.Println(internal.ErrorStyle.Render("Invalid ComfyUI path detected. Please check your configuration."))
+		return
+	}
+	
 	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
+	if nodeDir == "" {
+		fmt.Println(internal.ErrorStyle.Render("Invalid node directory path. Node creation cancelled for security reasons."))
+		return
+	}
 	
 	// Additional security check: ensure nodeDir is within customNodesDir
 	cleanCustomNodesDir := filepath.Clean(customNodesDir)
