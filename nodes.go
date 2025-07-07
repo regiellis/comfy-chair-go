@@ -88,7 +88,9 @@ func copyNodeTemplate(dstDir string, values map[string]string, templateType stri
 		}
 		
 		if d.IsDir() {
-			return os.MkdirAll(dstPath, 0755)
+			return internal.DryRunExecute("Create directory: %s", func() error {
+				return os.MkdirAll(dstPath, 0755)
+			}, dstPath)
 		}
 		
 		data, err := nodeTemplateFS.ReadFile(path)
@@ -97,12 +99,16 @@ func copyNodeTemplate(dstDir string, values map[string]string, templateType stri
 		}
 		
 		// Ensure parent directory exists
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		if err := internal.DryRunExecute("Create parent directory: %s", func() error {
+			return os.MkdirAll(filepath.Dir(dstPath), 0755)
+		}, filepath.Dir(dstPath)); err != nil {
 			return err
 		}
 		
 		content := replacePlaceholders(string(data), values)
-		return os.WriteFile(dstPath, []byte(content), 0644)
+		return internal.DryRunExecute("Create file: %s", func() error {
+			return os.WriteFile(dstPath, []byte(content), 0644)
+		}, dstPath)
 	})
 }
 
@@ -260,14 +266,18 @@ func createNewNode() {
 			fmt.Println(internal.InfoStyle.Render("Node creation cancelled."))
 			return
 		}
-		if err := os.RemoveAll(nodeDir); err != nil {
+		if err := internal.DryRunExecute("Remove existing node directory: %s", func() error {
+			return os.RemoveAll(nodeDir)
+		}, nodeDir); err != nil {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to remove existing node '%s': %v", nodeName, err)))
 			return
 		}
 	}
 
 	// Create the node directory
-	if err := os.MkdirAll(nodeDir, 0755); err != nil {
+	if err := internal.DryRunExecute("Create node directory: %s", func() error {
+		return os.MkdirAll(nodeDir, 0755)
+	}, nodeDir); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to create node directory: %v", err)))
 		return
 	}

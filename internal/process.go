@@ -35,6 +35,15 @@ var procCache = &processCache{
 // ExecuteCommand creates and returns an exec.Command with proper stdout/stderr handling
 // For foreground processes, it waits for completion. For background processes, it starts and returns immediately.
 func ExecuteCommand(commandName string, args []string, workDir string, logFilePath string, inBackground bool) (*os.Process, error) {
+	// Check if in dry-run mode
+	if IsDryRun() {
+		mode := "foreground"
+		if inBackground {
+			mode = "background"
+		}
+		DryRunLog("Would execute command: %s %s (in %s mode, workdir: %s)", commandName, strings.Join(args, " "), mode, workDir)
+		return nil, nil
+	}
 	// Basic validation: command name should not be empty and should not contain path separators unless it's an absolute path
 	if commandName == "" {
 		return nil, fmt.Errorf("command name cannot be empty")

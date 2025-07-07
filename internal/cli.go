@@ -16,6 +16,11 @@ type CommandHandler func()
 // EnvironmentCommandHandler represents a function that handles a command with environment context
 type EnvironmentCommandHandler func(inst *ComfyInstall)
 
+// GlobalFlags represents global CLI flags that apply to all commands
+type GlobalFlags struct {
+	DryRun bool
+}
+
 // Command represents a CLI command with its metadata
 type Command struct {
 	Name         string
@@ -31,6 +36,7 @@ type CLIRouter struct {
 	commands   map[string]*Command
 	paths      *Paths
 	reloadFunc func(string, int, []string, []string)
+	dryRun     bool
 }
 
 // NewCLIRouter creates a new CLI router
@@ -59,12 +65,29 @@ func (r *CLIRouter) Route(args []string) bool {
 		return false // No command provided, fall back to interactive menu
 	}
 	
-	commandName := args[1]
+	// Parse global flags and filter them out
+	filteredArgs, globalFlags := r.parseGlobalFlags(args)
+	r.dryRun = globalFlags.DryRun
+	
+	// Set global dry-run state
+	SetDryRunMode(r.dryRun)
+	
+	if len(filteredArgs) <= 1 {
+		return false // No command after flags, fall back to interactive menu
+	}
+	
+	commandName := filteredArgs[1]
 	cmd, exists := r.commands[commandName]
 	if !exists {
 		fmt.Printf("Unknown command: %s\n", commandName)
 		r.ShowHelp()
 		os.Exit(1)
+	}
+	
+	// Show dry-run message if enabled
+	if r.dryRun {
+		fmt.Println(WarningStyle.Render("🔍 DRY RUN MODE - No actual changes will be made"))
+		fmt.Println()
 	}
 	
 	// Execute the command
@@ -80,11 +103,47 @@ func (r *CLIRouter) Route(args []string) bool {
 	return true
 }
 
+// parseGlobalFlags parses global flags from command line arguments
+func (r *CLIRouter) parseGlobalFlags(args []string) ([]string, GlobalFlags) {
+	var flags GlobalFlags
+	var filteredArgs []string
+	
+	// Keep the program name
+	if len(args) > 0 {
+		filteredArgs = append(filteredArgs, args[0])
+	}
+	
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--dry-run", "-n":
+			flags.DryRun = true
+		case "--help", "-h":
+			// Help flag is handled as a command, so include it
+			filteredArgs = append(filteredArgs, arg)
+		default:
+			// Not a global flag, add to filtered args
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+	
+	return filteredArgs, flags
+}
+
+// IsDryRun returns whether dry-run mode is enabled
+func (r *CLIRouter) IsDryRun() bool {
+	return r.dryRun
+}
+
 // ShowHelp displays available commands
 func (r *CLIRouter) ShowHelp() {
 	fmt.Println(TitleStyle.Render("Comfy Chair - ComfyUI Development Tool"))
 	fmt.Println()
-	fmt.Println(InfoStyle.Render("Usage: comfy-chair [command]"))
+	fmt.Println(InfoStyle.Render("Usage: comfy-chair [global-flags] [command]"))
+	fmt.Println()
+	fmt.Println(InfoStyle.Render("Global Flags:"))
+	fmt.Println("  --dry-run, -n    Show what would be done without making changes")
+	fmt.Println("  --help, -h       Show this help message")
 	fmt.Println()
 	fmt.Println(InfoStyle.Render("Available Commands:"))
 	fmt.Println()
