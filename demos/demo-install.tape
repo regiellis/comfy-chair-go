@@ -1,4 +1,5 @@
-Output demo-install.gif
+Output gifs/demo-install.gif
+Output mp4/demo-install.mp4
 
 Set FontSize 16
 Set Width 1200
@@ -8,12 +9,13 @@ Set TypingSpeed 100ms
 Set Margin 20
 Set MarginFill "#FACD15"
 Set BorderRadius 10
+Set Theme "catppuccin-mocha"
 
 
 Sleep 1s
 
 # Start the Comfy Chair install process
-Type "../comfy-chair install"
+Type "./comfy-chair install"
 Enter
 Sleep 2s
 

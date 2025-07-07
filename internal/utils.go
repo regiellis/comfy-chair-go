@@ -15,6 +15,9 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Global state for dry-run mode
+var dryRunMode bool
+
 // Styles (exported)
 var (
 	InfoStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))  // Blue
@@ -388,4 +391,36 @@ func HandleFormError(err error, operationName string) bool {
 	
 	fmt.Println(ErrorStyle.Render(fmt.Sprintf("Form error during %s: %v", operationName, err)))
 	return true // Error occurred, should exit
+}
+
+// Dry-run utility functions
+
+// SetDryRunMode sets the global dry-run mode state
+func SetDryRunMode(enabled bool) {
+	dryRunMode = enabled
+}
+
+// IsDryRun returns whether dry-run mode is currently enabled
+func IsDryRun() bool {
+	return dryRunMode
+}
+
+// DryRunLog logs what would happen in dry-run mode
+func DryRunLog(action string, args ...interface{}) {
+	if dryRunMode {
+		message := fmt.Sprintf(action, args...)
+		fmt.Println(WarningStyle.Render("DRY RUN: " + message))
+	}
+}
+
+// DryRunExecute executes an action only if not in dry-run mode
+func DryRunExecute(action string, fn func() error, args ...interface{}) error {
+	message := fmt.Sprintf(action, args...)
+	
+	if dryRunMode {
+		fmt.Println(WarningStyle.Render("DRY RUN: " + message))
+		return nil
+	}
+	
+	return fn()
 }

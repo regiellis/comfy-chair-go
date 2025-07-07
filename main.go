@@ -1066,6 +1066,34 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create CLI router and register commands
+	router := internal.NewCLIRouter(&appPaths, reloadComfyUI)
+	router.SetupCLICommands(
+		startComfyUIWithEnv,
+		stopComfyUIWithEnv,
+		restartComfyUIWithEnv,
+		updateComfyUIWithEnv,
+		statusComfyUIWithEnv,
+		installComfyUI,
+		createNewNode,
+		listCustomNodes,
+		deleteCustomNode,
+		packNode, // Changed from packCustomNode
+		updateCustomNodes,
+		migrateCustomNodes,
+		migrateWorkflows,
+		migrateInputImages, // Changed from migrateImages
+		addOrRemoveNodeWorkflows, // Changed from nodeWorkflows
+		removeEnv, // Changed from removeEnvironment
+		func() { _ = syncEnvWithExample() }, // Changed from syncEnvFile
+	)
+
+	// Try to route the command
+	if router.Route(os.Args) {
+		return
+	}
+
+	// Fall back to interactive menu if no command provided or recognized
 	// Support short CLI commands (e.g., comfy-chair start, stop, update, etc.)
 	if len(os.Args) > 1 {
 		switch os.Args[1] {

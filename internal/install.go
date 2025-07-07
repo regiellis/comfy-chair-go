@@ -48,14 +48,22 @@ func InstallComfyUI(
 		nodePath := filepath.Join(ExpandUserPath(appPaths.ComfyUIDir), "custom_nodes", node.Name)
 		if _, err := os.Stat(nodePath); os.IsNotExist(err) {
 			fmt.Println(InfoStyle.Render("Cloning default node: " + node.Name))
-			cmd := exec.Command("git", "clone", node.Repo, nodePath)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
+			
+			err := DryRunExecute("Git clone: %s -> %s", func() error {
+				cmd := exec.Command("git", "clone", node.Repo, nodePath)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				return cmd.Run()
+			}, node.Repo, nodePath)
+			
+			if err != nil {
 				fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to clone node %s: %v", node.Name, err)))
 				continue
 			}
-			fmt.Println(SuccessStyle.Render(fmt.Sprintf("Successfully cloned node: %s", node.Name)))
+			
+			if !IsDryRun() {
+				fmt.Println(SuccessStyle.Render(fmt.Sprintf("Successfully cloned node: %s", node.Name)))
+			}
 		}
 		// After cloning, install requirements if present
 		reqFile := filepath.Join(nodePath, "requirements.txt")
@@ -66,14 +74,19 @@ func InstallComfyUI(
 			if _, err := os.Stat(uvPath); err == nil {
 				// Ensure pip is installed in the venv
 				fmt.Println(InfoStyle.Render("Updating pip in virtual environment..."))
-				cmdPip := exec.Command(uvPath, "pip", "install", "-U", "pip")
-				cmdPip.Dir = ExpandUserPath(appPaths.ComfyUIDir)
-				cmdPip.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
-				cmdPip.Stdout = os.Stdout
-				cmdPip.Stderr = os.Stderr
-				if err := cmdPip.Run(); err != nil {
+				
+				err := DryRunExecute("Update pip using uv", func() error {
+					cmdPip := exec.Command(uvPath, "pip", "install", "-U", "pip")
+					cmdPip.Dir = ExpandUserPath(appPaths.ComfyUIDir)
+					cmdPip.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
+					cmdPip.Stdout = os.Stdout
+					cmdPip.Stderr = os.Stderr
+					return cmdPip.Run()
+				})
+				
+				if err != nil {
 					fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to update pip: %v", err)))
-				} else {
+				} else if !IsDryRun() {
 					fmt.Println(SuccessStyle.Render("Successfully updated pip"))
 				}
 				// Install requirements if present
