@@ -24,7 +24,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -44,22 +43,7 @@ const (
 // Define the global appPaths for the project, using the struct from internal/utils.go
 var appPaths internal.Paths
 
-// Process status cache for performance optimization
-type processStatus struct {
-	isRunning bool
-	lastCheck time.Time
-}
-
-type processCache struct {
-	mu          sync.RWMutex
-	cache       map[int]processStatus
-	lastCleanup time.Time
-}
-
-// Global process cache instance
-var procCache = &processCache{
-	cache: make(map[int]processStatus),
-}
+// Process cache is now in internal/process.go to avoid duplication
 
 // getPythonExecutables returns a list of common Python executable names.
 func getPythonExecutables() []string {
@@ -306,12 +290,12 @@ func startComfyUI(background bool) {
 	}
 	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Starting ComfyUI from %s in the %s...", comfyDir, action)))
 
-	if pid, isRunning := internal.GetRunningPIDForEnv(pidFile); isRunning {
+	if pid, isRunning := internal.GetRunningPID(pidFile); isRunning {
 		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("ComfyUI is already running (PID: %d).", pid)))
 		return
 	}
 	if _, err := os.Stat(internal.ExpandUserPath(pidFile)); err == nil {
-		pidFromFile, _ := internal.ReadPIDForEnv(pidFile)
+		pidFromFile, _ := internal.ReadPID(pidFile)
 		if pidFromFile != 0 && !internal.IsProcessRunning(pidFromFile) {
 			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Removing stale PID file for PID %d.", pidFromFile)))
 			os.Remove(internal.ExpandUserPath(pidFile))
@@ -383,7 +367,7 @@ func startComfyUI(background bool) {
 		}
 	}
 	if background && process != nil {
-		err := internal.WritePIDForEnv(process.Pid, pidFile)
+		err := internal.WritePID(process.Pid, pidFile)
 		if err != nil {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to write PID file: %v (path: %s)", err, pidFile)))
 			process.Kill()
@@ -1384,7 +1368,7 @@ func stopComfyUIWithEnv(inst *internal.ComfyInstall) {
 	appPaths.ComfyUIDir = inst.Path
 	defer func() { appPaths.ComfyUIDir = oldDir }()
 	pidFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "comfyui.pid"))
-	if pid, isRunning := internal.GetRunningPIDForEnv(pidFile); isRunning {
+	if pid, isRunning := internal.GetRunningPID(pidFile); isRunning {
 		process, err := os.FindProcess(pid)
 		if err == nil {
 			if runtime.GOOS == "windows" {
@@ -1415,7 +1399,7 @@ func statusComfyUIWithEnv(inst *internal.ComfyInstall) {
 	defer func() { appPaths.ComfyUIDir = oldDir }()
 	pidFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "comfyui.pid"))
 	logFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "comfyui.log"))
-	pid, isRunning := internal.GetRunningPIDForEnv(pidFile)
+	pid, isRunning := internal.GetRunningPID(pidFile)
 
 	// Gather log info
 	logSize := "(not found)"

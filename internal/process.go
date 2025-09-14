@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,22 +13,22 @@ import (
 	"time"
 )
 
-// processStatus represents cached process status information
-type processStatus struct {
-	isRunning bool
-	lastCheck time.Time
+// ProcessStatus represents cached process status information
+type ProcessStatus struct {
+	IsRunning bool
+	LastCheck time.Time
 }
 
-// processCache manages cached process status to avoid frequent system calls
-type processCache struct {
-	cache       map[int]processStatus
+// ProcessCache manages cached process status to avoid frequent system calls
+type ProcessCache struct {
+	cache       map[int]ProcessStatus
 	mu          sync.RWMutex
 	lastCleanup time.Time
 }
 
 // Global process cache instance
-var procCache = &processCache{
-	cache: make(map[int]processStatus),
+var ProcCache = &ProcessCache{
+	cache: make(map[int]ProcessStatus),
 }
 
 // ExecuteCommand creates and returns an exec.Command with proper stdout/stderr handling
@@ -119,32 +118,20 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 
 // ReadPID reads the process ID from the pidFile.
 func ReadPID(pidFile string) (int, error) {
-	if _, err := os.Stat(ExpandUserPath(pidFile)); os.IsNotExist(err) {
-		return 0, os.ErrNotExist // Return specific error
-	}
-	data, err := os.ReadFile(ExpandUserPath(pidFile))
-	if err != nil {
-		return 0, err
-	}
-	if len(data) == 0 {
-		return 0, fmt.Errorf("pid file is empty: %s", pidFile)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, fmt.Errorf("invalid PID in file %s: %w", pidFile, err)
-	}
-	return pid, nil
+	pf := NewPIDFile(pidFile)
+	return pf.Read()
 }
 
 // CleanupPIDFile removes the pidFile.
 func CleanupPIDFile(pidFile string) {
-	if err := os.Remove(ExpandUserPath(pidFile)); err != nil && !os.IsNotExist(err) {
-		fmt.Println(WarningStyle.Render(fmt.Sprintf("Warning: Failed to remove PID file %s: %v", pidFile, err)))
+	pf := NewPIDFile(pidFile)
+	if err := pf.Remove(); err != nil {
+		Log.Warning("Failed to remove PID file %s: %v", pidFile, err)
 	}
 }
 
 // cleanupStaleEntries removes stale cache entries
-func (pc *processCache) cleanupStaleEntries() {
+func (pc *ProcessCache) cleanupStaleEntries() {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 	
@@ -156,7 +143,7 @@ func (pc *processCache) cleanupStaleEntries() {
 	
 	// Remove entries older than 30 seconds
 	for pid, status := range pc.cache {
-		if time.Since(status.lastCheck) > 30*time.Second {
+		if time.Since(status.LastCheck) > 30*time.Second {
 			delete(pc.cache, pid)
 		}
 	}
@@ -164,7 +151,7 @@ func (pc *processCache) cleanupStaleEntries() {
 }
 
 // getCachedStatus retrieves cached process status
-func (pc *processCache) getCachedStatus(pid int) (processStatus, bool) {
+func (pc *ProcessCache) getCachedStatus(pid int) (ProcessStatus, bool) {
 	pc.mu.RLock()
 	defer pc.mu.RUnlock()
 	
@@ -173,13 +160,13 @@ func (pc *processCache) getCachedStatus(pid int) (processStatus, bool) {
 }
 
 // updateCache updates the process status cache
-func (pc *processCache) updateCache(pid int, isRunning bool) {
+func (pc *ProcessCache) updateCache(pid int, isRunning bool) {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 	
-	pc.cache[pid] = processStatus{
-		isRunning: isRunning,
-		lastCheck: time.Now(),
+	pc.cache[pid] = ProcessStatus{
+		IsRunning: isRunning,
+		LastCheck: time.Now(),
 	}
 }
 
@@ -241,84 +228,32 @@ func IsProcessRunning(pid int) bool {
 	}
 
 	// Clean up stale entries periodically
-	procCache.cleanupStaleEntries()
+	ProcCache.cleanupStaleEntries()
 
 	// Check cache first
-	if status, exists := procCache.getCachedStatus(pid); exists {
+	if status, exists := ProcCache.getCachedStatus(pid); exists {
 		// Use cached result if it's fresh (within 5 seconds)
-		if time.Since(status.lastCheck) < 5*time.Second {
-			return status.isRunning
+		if time.Since(status.LastCheck) < 5*time.Second {
+			return status.IsRunning
 		}
 	}
 
 	// Cache miss or stale - check for real and update cache
 	isRunning := isProcessRunningReal(pid)
-	procCache.updateCache(pid, isRunning)
+	ProcCache.updateCache(pid, isRunning)
 	return isRunning
 }
 
 // GetRunningPID reads PID from file and checks if the process is running.
 func GetRunningPID(pidFile string) (pid int, isRunning bool) {
-	pidRead, err := ReadPID(pidFile)
-	if err != nil {
-		// os.ErrNotExist is normal if ComfyUI not started via this tool's background mode.
-		// Other errors (permission, corrupted file) are warnings.
-		if !errors.Is(err, os.ErrNotExist) {
-			fmt.Println(WarningStyle.Render(fmt.Sprintf("Warning: Could not read PID file %s: %v", pidFile, err)))
-		}
-		return 0, false
-	}
-	if IsProcessRunning(pidRead) {
-		return pidRead, true
-	}
-	return pidRead, false // PID read, but process not running (stale PID)
+	pf := NewPIDFile(pidFile)
+	return pf.GetRunningPID()
 }
 
-// GetRunningPIDForEnv reads PID from a given pidFile and checks if the process is running.
-func GetRunningPIDForEnv(pidFile string) (pid int, isRunning bool) {
-	pid, _ = ReadPIDForEnv(pidFile)
-	isRunning = IsProcessRunning(pid)
-	return
-}
-
-// ReadPIDForEnv reads the PID from a given pidFile.
-func ReadPIDForEnv(pidFile string) (int, error) {
-	expandedPath := ExpandUserPath(pidFile)
-	if expandedPath == "" {
-		return 0, fmt.Errorf("invalid PID file path")
-	}
-	f, err := os.Open(expandedPath)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-	var pid int
-	n, err := fmt.Fscanf(f, "%d", &pid)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read PID from file: %w", err)
-	}
-	if n != 1 {
-		return 0, fmt.Errorf("invalid PID format in file")
-	}
-	if pid <= 0 {
-		return 0, fmt.Errorf("invalid PID value: %d", pid)
-	}
-	return pid, nil
-}
-
-// WritePIDForEnv writes the PID to a given pidFile.
-func WritePIDForEnv(pid int, pidFile string) error {
-	expandedPath := ExpandUserPath(pidFile)
-	if expandedPath == "" {
-		return fmt.Errorf("invalid PID file path")
-	}
-	f, err := os.Create(expandedPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = fmt.Fprintf(f, "%d", pid)
-	return err
+// WritePID writes the PID to a pidFile
+func WritePID(pid int, pidFile string) error {
+	pf := NewPIDFile(pidFile)
+	return pf.Write(pid)
 }
 
 // validateCommand validates a command name to prevent command injection

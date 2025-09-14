@@ -15,7 +15,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+)
 
+// NOTE: Legacy dynamic Web/API scaffolding removed in favor of static templates/webapi-node.
+import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/huh"
 	"github.com/regiellis/comfyui-chair-go/internal"
@@ -58,6 +61,8 @@ func copyNodeTemplate(dstDir string, values map[string]string, templateType stri
 		templateRoot = "templates/api-node"
 	case "model":
 		templateRoot = "templates/model-node"
+	case "webapi":
+		templateRoot = "templates/webapi-node"
 	default:
 		templateRoot = "templates/node"
 	}
@@ -111,7 +116,6 @@ func copyNodeTemplate(dstDir string, values map[string]string, templateType stri
 		}, dstPath)
 	})
 }
-
 // input sanitization and validation for node creation
 func sanitizeNodeInput(input string) string {
 	// Trim whitespace
@@ -156,10 +160,7 @@ func isValidNodeName(name string) bool {
 	}
 	// Only allow alphanumeric, underscore, and hyphen
 	matched, _ := regexp.MatchString(`^[a-zA-Z0-9_-]+$`, name)
-	if !matched {
-		return false
-	}
-	return true
+	return matched
 }
 
 // createNewNode prompts the user for node details and scaffolds a new custom node in ComfyUI's custom_nodes directory.
@@ -176,7 +177,7 @@ func createNewNode() {
 	authorDefault := envVars["CUSTOM_NODES_AUTHOR"]
 	pubidDefault := envVars["CUSTOM_NODES_PUBID"]
 
-	// Prompt for template type first
+	// Prompt for template type first (added Web/API choice)
 	var templateType string
 	templateForm := huh.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().
@@ -187,6 +188,7 @@ func createNewNode() {
 				huh.NewOption("Advanced Node - Rich UI components and settings", "advanced"),
 				huh.NewOption("API Node - Focused on API integrations", "api"),
 				huh.NewOption("Model Loader Node - For loading and managing ML models", "model"),
+				huh.NewOption("Web/API Node - Floating panel + HTTP endpoints (recommended)", "webapi"),
 			).
 			Value(&templateType),
 	)).WithTheme(huh.ThemeCharm())
@@ -208,6 +210,7 @@ func createNewNode() {
 		internal.PromptReturnToMenu()
 		return
 	}
+
 	if nodeName == "" {
 		fmt.Println(internal.InfoStyle.Render("Node creation cancelled (no name provided)."))
 		return
@@ -224,14 +227,15 @@ func createNewNode() {
 		fmt.Println(internal.ErrorStyle.Render("Invalid ComfyUI path detected. Please check your configuration."))
 		return
 	}
-	
+
+	// Determine node directory
 	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
 	if nodeDir == "" {
 		fmt.Println(internal.ErrorStyle.Render("Invalid node directory path. Node creation cancelled for security reasons."))
 		return
 	}
-	
-	// Additional security check: ensure nodeDir is within customNodesDir
+
+	// Security: ensure nodeDir within customNodesDir
 	cleanCustomNodesDir := filepath.Clean(customNodesDir)
 	cleanNodeDir := filepath.Clean(nodeDir)
 	if !strings.HasPrefix(cleanNodeDir, cleanCustomNodesDir+string(filepath.Separator)) {
@@ -239,9 +243,8 @@ func createNewNode() {
 		return
 	}
 
-	// Create Python-safe class name (replace hyphens with underscores)
 	pythonSafeNodeName := strings.ReplaceAll(nodeName, "-", "_")
-	
+
 	values := map[string]string{
 		internal.NodeNamePlaceholder:      pythonSafeNodeName,
 		internal.NodeNameLowerPlaceholder: strings.ToLower(pythonSafeNodeName),
@@ -251,10 +254,10 @@ func createNewNode() {
 		"{{Dependencies}}":                "",
 		internal.PubIDPlaceholder:         pubid,
 		"{{DisplayName}}":                 "",
-		"{{Version}}":       "1.0.0",
+		"{{Version}}":                     "1.0.0",
 	}
 
-	// 1. Node existence check before creation
+	// Overwrite confirmation
 	if _, err := os.Stat(nodeDir); err == nil {
 		var confirm string
 		fmt.Printf("A node named '%s' already exists. Overwrite? [y/N]: ", nodeName)
@@ -266,27 +269,28 @@ func createNewNode() {
 			fmt.Println(internal.InfoStyle.Render("Node creation cancelled."))
 			return
 		}
-		if err := internal.DryRunExecute("Remove existing node directory: %s", func() error {
-			return os.RemoveAll(nodeDir)
-		}, nodeDir); err != nil {
+		if err := internal.DryRunExecute("Remove existing node directory: %s", func() error { return os.RemoveAll(nodeDir) }, nodeDir); err != nil {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to remove existing node '%s': %v", nodeName, err)))
 			return
 		}
 	}
 
-	// Create the node directory
-	if err := internal.DryRunExecute("Create node directory: %s", func() error {
-		return os.MkdirAll(nodeDir, 0755)
-	}, nodeDir); err != nil {
+	// Create node directory
+	if err := internal.DryRunExecute("Create node directory: %s", func() error { return os.MkdirAll(nodeDir, 0755) }, nodeDir); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to create node directory: %v", err)))
 		return
 	}
 
+	// Copy template (webapi handled via template directory now)
 	if err := copyNodeTemplate(nodeDir, values, templateType); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to scaffold node: %v", err)))
 		return
 	}
-	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Node '%s' created in %s", nodeName, nodeDir)))
+	if templateType == "webapi" {
+		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Web/API Node '%s' created in %s", nodeName, nodeDir)))
+	} else {
+		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Node '%s' created in %s", nodeName, nodeDir)))
+	}
 
 	// Auto-generate minimal example workflow JSON for the new node
 	exampleDir := filepath.Join(nodeDir, "example_workflows")
