@@ -240,7 +240,7 @@ func UpdateEnvFile(path string, updates map[string]string) error {
 func PromptEditEnvFile(path string) error {
 	env, _ := ReadEnvFile(path)
 	if len(env) == 0 {
-		fmt.Println(InfoStyle.Render("No variables found in .env. Starting with an empty file."))
+		Log.Info("No variables found in .env. Starting with an empty file.")
 	}
 
 	// Prepare slices for keys and values
@@ -261,7 +261,7 @@ func PromptEditEnvFile(path string) error {
 		).WithTheme(huh.ThemeCharm())
 		if err := form.Run(); err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {
-				fmt.Println(InfoStyle.Render("Edit cancelled by user."))
+				Log.Info("Edit cancelled by user.")
 				return nil
 			}
 			return err
@@ -309,7 +309,7 @@ func PromptEditEnvFile(path string) error {
 	if err := WriteEnvFile(path, env); err != nil {
 		return err
 	}
-	fmt.Println(SuccessStyle.Render(".env updated successfully."))
+	Log.Success(".env updated successfully.")
 	return nil
 }
 
@@ -385,11 +385,11 @@ func HandleFormError(err error, operationName string) bool {
 	}
 	
 	if errors.Is(err, huh.ErrUserAborted) {
-		fmt.Println(InfoStyle.Render(fmt.Sprintf("%s cancelled by user.", operationName)))
+		Log.Info("%s cancelled by user.", operationName)
 		return true // User cancelled, should exit
 	}
 	
-	fmt.Println(ErrorStyle.Render(fmt.Sprintf("Form error during %s: %v", operationName, err)))
+	Log.Error("Form error during %s: %v", operationName, err)
 	return true // Error occurred, should exit
 }
 
@@ -409,7 +409,7 @@ func IsDryRun() bool {
 func DryRunLog(action string, args ...interface{}) {
 	if dryRunMode {
 		message := fmt.Sprintf(action, args...)
-		fmt.Println(WarningStyle.Render("DRY RUN: " + message))
+		Log.Warning("DRY RUN: %s", message)
 	}
 }
 
@@ -418,7 +418,7 @@ func DryRunExecute(action string, fn func() error, args ...interface{}) error {
 	message := fmt.Sprintf(action, args...)
 	
 	if dryRunMode {
-		fmt.Println(WarningStyle.Render("DRY RUN: " + message))
+		Log.Warning("DRY RUN: %s", message)
 		return nil
 	}
 	

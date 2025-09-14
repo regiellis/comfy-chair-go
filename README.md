@@ -34,6 +34,8 @@
 - 🧹 **Clean & List:** Easily list and delete custom nodes.
 - 💻 **Cross-Platform:** Works on Linux, macOS, and Windows. Binaries are built for all major OS/arch on every release.
 - 🧑‍💻 **Developer Focused:** Built by a developer, for developers. No more manual file copying or error-prone node setup.
+- 🛡️ **Security Hardened:** Path traversal protection, command injection safeguards, and enhanced input validation protect against common attack vectors.
+- 🔍 **Dry-Run Preview:** Test any command safely with `--dry-run` flag to see what will happen before making changes.
 - 🛡️ **Port Conflict Detection:** Automatically checks if the default ComfyUI port (8188) is in use before starting. If the port is unavailable, you'll be prompted to use the next available port, ensuring smooth cross-platform operation.
 - 🏠 **Portable Path Support:** All config and environment paths now support portable placeholders like `{HOME}` and `{USERPROFILE}` for robust cross-platform compatibility.
 
@@ -79,6 +81,7 @@ task build   # Build binary
 - **reload**: Watch for changes in custom_nodes and auto-restart ComfyUI
 - **start/background/stop/restart/update/install**: Manage ComfyUI lifecycle
 - **Interactive TUI**: Use the CLI with no arguments for a beautiful menu
+- **🆕 Dry-Run Mode**: Preview what commands will do with `--dry-run` or `-n` flag before making changes
 
 ## Prerequisites
 
@@ -125,6 +128,19 @@ Comfy Chair **automatically detects and uses Python virtual environments** named
 
 ## 🆕 Recent Improvements & Features
 
+- **🛡️ Enhanced Security & Stability:**
+  - Path traversal protection prevents directory escape attacks
+  - Command injection safeguards with comprehensive input validation
+  - Resource leak fixes with proper file handling and error checking
+  - Improved input sanitization to block dangerous characters
+  - Fixed Windows PID matching bugs for better cross-platform reliability
+- **🔍 Dry-Run Mode:**
+  - Use `--dry-run` or `-n` flag with any command to preview changes before execution
+  - Shows clear "DRY RUN MODE" indicator when enabled
+  - Safely test node creation, deletion, and system commands without side effects
+- **🐛 Bug Fixes:**
+  - Fixed node creation directory errors by ensuring parent directories exist
+  - Improved template file copying for nested directory structures
 - **Opt-in Node Watching for Reloads:**
   - Use the new `watch_nodes` command or select "Select Watched Nodes for Reload" from the interactive menu to choose which custom node directories should trigger reloads. Only the selected directories are watched; all others are ignored by default.
   - Your selection is saved to `comfy-installs.json` as `reload_include_dirs` (per environment).
@@ -190,7 +206,16 @@ If your GPU type requires manual steps, Comfy Chair will print instructions. You
 ```bash
 comfy-chair <command> [arguments...]
 comfy-chair --help   # Show all commands and aliases
+comfy-chair --dry-run <command>  # Preview what a command will do without making changes
+comfy-chair -n <command>         # Short form of --dry-run
 ```
+
+### Global Flags
+
+| Flag           | Short | Description                                    |
+|----------------|-------|------------------------------------------------|
+| --dry-run      | -n    | Preview what commands will do without executing them |
+| --help         | -h    | Show help and usage information               |
 
 ### Command Aliases
 
@@ -224,9 +249,20 @@ Run `comfy-chair status` to see:
 ## Example Workflow
 
 ```bash
+# Preview node creation first
+comfy-chair --dry-run create-node
+
+# Create the node after reviewing
 comfy-chair create-node
+
+# List existing nodes
 comfy-chair list-nodes
+
+# Start live reload watching
 comfy-chair reload
+
+# Pack a node for distribution (preview first)
+comfy-chair -n pack-node
 comfy-chair pack-node
 ```
 

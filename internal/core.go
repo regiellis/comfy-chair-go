@@ -13,8 +13,8 @@ func GetActiveComfyInstall() (*ComfyInstall, error) {
 	cfg, err := LoadGlobalConfig()
 	if err != nil {
 		// If config doesn't exist, offer to create it
-		fmt.Println(WarningStyle.Render("ComfyUI environment configuration not found."))
-		fmt.Println(InfoStyle.Render("You can create a configuration by running the 'Install/Reconfigure ComfyUI' option from the main menu."))
+		Log.Warning("ComfyUI environment configuration not found.")
+		Log.Info("You can create a configuration by running the 'Install/Reconfigure ComfyUI' option from the main menu.")
 		return nil, fmt.Errorf("no ComfyUI environment configured - use Install option to set up")
 	}
 	
@@ -24,13 +24,13 @@ func GetActiveComfyInstall() (*ComfyInstall, error) {
 		if inst != nil {
 			return inst, nil
 		}
-		fmt.Println(WarningStyle.Render(fmt.Sprintf("Working environment '%s' not found in configuration.", workingEnv)))
+		Log.Warning("Working environment '%s' not found in configuration.", workingEnv)
 	}
 
 	inst := cfg.FindDefaultInstall()
 	if inst == nil {
-		fmt.Println(WarningStyle.Render("No default environment found in configuration."))
-		fmt.Println(InfoStyle.Render("Use 'Environment Management' > 'Manage Branded Environments' to set a default."))
+		Log.Warning("No default environment found in configuration.")
+		Log.Info("Use 'Environment Management' > 'Manage Branded Environments' to set a default.")
 		return nil, fmt.Errorf("no default environment configured")
 	}
 	return inst, nil
@@ -40,15 +40,15 @@ func GetActiveComfyInstall() (*ComfyInstall, error) {
 func RunWithEnvConfirmation(action string, fn func(inst *ComfyInstall)) {
 	cfg, err := LoadGlobalConfig()
 	if err != nil {
-		fmt.Println(ErrorStyle.Render("Failed to load global config: " + err.Error()))
-		fmt.Println(InfoStyle.Render("Use 'Install/Reconfigure ComfyUI' to create the initial configuration."))
+		Log.Error("Failed to load global config: %v", err)
+		Log.Info("Use 'Install/Reconfigure ComfyUI' to create the initial configuration.")
 		PromptReturnToMenu()
 		return
 	}
 	
 	if len(cfg.Installs) == 0 {
-		fmt.Println(WarningStyle.Render("No ComfyUI environments configured."))
-		fmt.Println(InfoStyle.Render("Use 'Install/Reconfigure ComfyUI' to add your first environment."))
+		Log.Warning("No ComfyUI environments configured.")
+		Log.Info("Use 'Install/Reconfigure ComfyUI' to add your first environment.")
 		PromptReturnToMenu()
 		return
 	}
@@ -81,7 +81,7 @@ func RunWithEnvConfirmation(action string, fn func(inst *ComfyInstall)) {
 		}
 	}
 	if inst == nil {
-		fmt.Println(ErrorStyle.Render("No environment selected or found."))
+		Log.Error("No environment selected or found.")
 		PromptReturnToMenu()
 		return
 	}
