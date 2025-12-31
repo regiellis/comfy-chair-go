@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -8,16 +9,36 @@ import (
 )
 
 // GetActiveComfyInstall returns the active ComfyUI installation based on environment variables or default
-// If no configuration exists, it offers to create one
+// If no configuration exists, it offers to create one interactively
 func GetActiveComfyInstall() (*ComfyInstall, error) {
 	cfg, err := LoadGlobalConfig()
 	if err != nil {
-		// If config doesn't exist, offer to create it
+		// If config doesn't exist, offer interactive options
 		Log.Warning("ComfyUI environment configuration not found.")
-		Log.Info("You can create a configuration by running the 'Install/Reconfigure ComfyUI' option from the main menu.")
-		return nil, fmt.Errorf("no ComfyUI environment configured - use Install option to set up")
+
+		var choice string
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("No ComfyUI environment configured. What would you like to do?").
+				Options(
+					huh.NewOption("Go to main menu to install/configure", "menu"),
+					huh.NewOption("Exit", "exit"),
+				).
+				Value(&choice),
+		)).WithTheme(huh.ThemeCharm())
+
+		if err := form.Run(); err != nil {
+			return nil, fmt.Errorf("operation cancelled")
+		}
+
+		if choice == "exit" || choice == "" {
+			return nil, fmt.Errorf("operation cancelled - no environment configured")
+		}
+
+		// Return special error to signal caller should return to menu
+		return nil, fmt.Errorf("no ComfyUI environment configured - returning to menu")
 	}
-	
+
 	workingEnv := os.Getenv(WorkingComfyEnvKey)
 	if workingEnv != "" {
 		inst := cfg.FindInstallByType(InstallType(workingEnv))
@@ -29,6 +50,41 @@ func GetActiveComfyInstall() (*ComfyInstall, error) {
 
 	inst := cfg.FindDefaultInstall()
 	if inst == nil {
+		// Offer to select from available environments or set a default
+		if len(cfg.Installs) > 0 {
+			Log.Warning("No default environment set, but %d environment(s) found.", len(cfg.Installs))
+			var envOptions []huh.Option[string]
+			for _, i := range cfg.Installs {
+				label := string(i.Type)
+				if i.Name != "" && i.Name != string(i.Type) {
+					label += " - " + i.Name
+				}
+				envOptions = append(envOptions, huh.NewOption(label, string(i.Type)))
+			}
+			envOptions = append(envOptions, huh.NewOption("Cancel", "cancel"))
+
+			var selected string
+			form := huh.NewForm(huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Select an environment to use:").
+					Options(envOptions...).
+					Value(&selected),
+			)).WithTheme(huh.ThemeCharm())
+
+			if err := form.Run(); err != nil {
+				return nil, fmt.Errorf("operation cancelled")
+			}
+
+			if selected == "cancel" || selected == "" {
+				return nil, fmt.Errorf("no environment selected")
+			}
+
+			inst = cfg.FindInstallByType(InstallType(selected))
+			if inst != nil {
+				return inst, nil
+			}
+		}
+
 		Log.Warning("No default environment found in configuration.")
 		Log.Info("Use 'Environment Management' > 'Manage Branded Environments' to set a default.")
 		return nil, fmt.Errorf("no default environment configured")
@@ -75,7 +131,16 @@ func RunWithEnvConfirmation(action string, fn func(inst *ComfyInstall)) {
 		}
 		var selected string
 		form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Select environment for '" + action + "':").Options(envOptions...).Value(&selected))).WithTheme(huh.ThemeCharm())
-		_ = form.Run()
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				Log.Info("Operation cancelled.")
+				PromptReturnToMenu()
+				return
+			}
+			Log.Error("Form error: %v", err)
+			PromptReturnToMenu()
+			return
+		}
 		if selected != "" {
 			inst = cfg.FindInstallByType(InstallType(selected))
 		}
@@ -100,5 +165,10 @@ func PromptReturnToMenu() {
 			).
 			Value(&dummy),
 	)).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		// Ignore errors here since this is just a prompt to continue
+		if !errors.Is(err, huh.ErrUserAborted) {
+			Log.Error("Form error: %v", err)
+		}
+	}
 }
