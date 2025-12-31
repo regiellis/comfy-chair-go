@@ -436,7 +436,14 @@ func updateComfyUI() {
 						Value(&action),
 				),
 			).WithTheme(huh.ThemeCharm())
-			_ = form.Run()
+			if err := form.Run(); err != nil {
+				if errors.Is(err, huh.ErrUserAborted) {
+					fmt.Println(internal.InfoStyle.Render("Update cancelled."))
+					return
+				}
+				internal.Log.Error("Form error: %v", err)
+				return
+			}
 			switch action {
 			case "stash":
 				fmt.Println(internal.InfoStyle.Render("Stashing local changes..."))
@@ -628,8 +635,13 @@ func installComfyUI() {
 		formZluda := huh.NewForm(huh.NewGroup(
 			huh.NewConfirm().Title("Would you like to use the ComfyUI-Zluda repo for AMD (experimental, for running CUDA on AMD)?").Value(&zluda),
 		)).WithTheme(huh.ThemeCharm())
-		_ = formZluda.Run()
-		if zluda {
+		if err := formZluda.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println(internal.InfoStyle.Render("Using standard ComfyUI repo."))
+			} else {
+				internal.Log.Error("Form error: %v", err)
+			}
+		} else if zluda {
 			comfyRepo = "git@github.com:patientx/ComfyUI-Zluda.git"
 			fmt.Println(internal.WarningStyle.Render("Using ComfyUI-Zluda repo for AMD (experimental)."))
 		} else {
@@ -678,7 +690,14 @@ func installComfyUI() {
 				if isLounge {
 					var confirm bool
 					form2 := huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("You are about to REPLACE the Lounge (source of truth) install. Are you absolutely sure?").Value(&confirm))).WithTheme(huh.ThemeCharm())
-					_ = form2.Run()
+					if err := form2.Run(); err != nil {
+						if errors.Is(err, huh.ErrUserAborted) {
+							fmt.Println(internal.InfoStyle.Render("Lounge replacement cancelled."))
+							return
+						}
+						internal.Log.Error("Form error: %v", err)
+						return
+					}
 					if !confirm {
 						fmt.Println(internal.InfoStyle.Render("Lounge replacement cancelled."))
 						return
@@ -692,7 +711,14 @@ func installComfyUI() {
 		if !comfyFound {
 			var confirm bool
 			form := huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Directory exists but does not appear to be ComfyUI. Replace it?").Value(&confirm))).WithTheme(huh.ThemeCharm())
-			_ = form.Run()
+			if err := form.Run(); err != nil {
+				if errors.Is(err, huh.ErrUserAborted) {
+					fmt.Println(internal.InfoStyle.Render("Installation cancelled."))
+					return
+				}
+				internal.Log.Error("Form error: %v", err)
+				return
+			}
 			if !confirm {
 				fmt.Println(internal.InfoStyle.Render("Installation cancelled."))
 				return
@@ -947,7 +973,54 @@ func installComfyUI() {
 	}
 	fmt.Println(internal.SuccessStyle.Render("ComfyUI installation/reconfiguration complete!"))
 	fmt.Println(internal.InfoStyle.Render("This environment is now available in comfy-installs.json."))
-	fmt.Println(internal.InfoStyle.Render("To make it active, use the 'set active' or 'set_working_env' command. The .env file was NOT changed."))
+
+	// Offer to update .env file to make this the active environment
+	var updateEnv bool
+	envPreview := fmt.Sprintf("COMFYUI_PATH=%s\nWORKING_COMFY_ENV=%s", realComfyPath, envType)
+	confirmForm := huh.NewForm(huh.NewGroup(
+		huh.NewNote().
+			Title("Would you like to update your .env file to make this the active environment?").
+			Description(fmt.Sprintf("The following will be written to %s:\n\n%s", appPaths.EnvFile, envPreview)),
+		huh.NewConfirm().
+			Title("Update .env file?").
+			Value(&updateEnv),
+	)).WithTheme(huh.ThemeCharm())
+
+	if err := confirmForm.Run(); err == nil && updateEnv {
+		envUpdates := map[string]string{
+			"COMFYUI_PATH":       realComfyPath,
+			"WORKING_COMFY_ENV":  envType,
+		}
+
+		// Check if .env exists
+		if _, err := os.Stat(appPaths.EnvFile); os.IsNotExist(err) {
+			// Create new .env file
+			if err := internal.WriteEnvFile(appPaths.EnvFile, envUpdates); err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to create .env file: %v", err)))
+			} else {
+				fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf(".env file created at %s", appPaths.EnvFile)))
+				// Reload environment variables
+				os.Setenv("COMFYUI_PATH", realComfyPath)
+				os.Setenv("WORKING_COMFY_ENV", envType)
+				appPaths.IsConfigured = true
+				appPaths.ComfyUIDir = realComfyPath
+			}
+		} else {
+			// Update existing .env file
+			if err := internal.UpdateEnvFile(appPaths.EnvFile, envUpdates); err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update .env file: %v", err)))
+			} else {
+				fmt.Println(internal.SuccessStyle.Render(".env file updated successfully!"))
+				// Reload environment variables
+				os.Setenv("COMFYUI_PATH", realComfyPath)
+				os.Setenv("WORKING_COMFY_ENV", envType)
+				appPaths.IsConfigured = true
+				appPaths.ComfyUIDir = realComfyPath
+			}
+		}
+	} else {
+		fmt.Println(internal.InfoStyle.Render("To make it active later, use the 'set active' or 'set_working_env' command."))
+	}
 }
 
 
@@ -981,7 +1054,14 @@ func removeEnv() {
 	}
 	var selectedEnv string
 	form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Select environment to remove (disconnect):").Options(envOptions...).Value(&selectedEnv))).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println(internal.InfoStyle.Render("Operation cancelled."))
+			return
+		}
+		internal.Log.Error("Form error: %v", err)
+		return
+	}
 	if selectedEnv == "" {
 		fmt.Println(internal.InfoStyle.Render("No environment selected. Operation cancelled."))
 		return
@@ -1130,8 +1210,15 @@ func main() {
 					form := huh.NewForm(huh.NewGroup(
 						huh.NewMultiSelect[string]().Title("Select custom node directories to watch for reloads:").Options(nodeOptions...).Value(&selected),
 					)).WithTheme(huh.ThemeCharm())
-					_ = form.Run()
-					includedDirs = selected
+					if err := form.Run(); err != nil {
+						if errors.Is(err, huh.ErrUserAborted) {
+							internal.Log.Info("Using default (all directories)")
+						} else {
+							internal.Log.Error("Form error: %v", err)
+						}
+					} else {
+						includedDirs = selected
+					}
 					// Save to comfy-installs.json
 					cfg, _ := internal.LoadGlobalConfig()
 					for i := range cfg.Installs {
@@ -1219,7 +1306,16 @@ func main() {
 		SetWorkingEnv:    func() { handleSetWorkingEnvFunction() },
 	}
 
-	// Start the main menu loop
+	// Start the main menu loop with panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("\nFatal error: %v", r)))
+			internal.Log.Error("Panic recovered: %v", r)
+			fmt.Println(internal.InfoStyle.Render("The application has encountered an unexpected error and will now exit."))
+			fmt.Println(internal.InfoStyle.Render("Please report this issue at: https://github.com/your-repo/issues"))
+			os.Exit(1)
+		}
+	}()
 	internal.ShowMainMenu(menuChoices, &appPaths)
 }
 
@@ -1292,7 +1388,14 @@ func handleSetWorkingEnvFunction() {
 	}
 	var selectedEnv string
 	form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Select working environment:").Options(envOptions...).Value(&selectedEnv))).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println(internal.InfoStyle.Render("Operation cancelled."))
+			return
+		}
+		internal.Log.Error("Form error: %v", err)
+		return
+	}
 	if selectedEnv != "" {
 		inst := cfg.FindInstallByType(internal.InstallType(selectedEnv))
 
@@ -1586,7 +1689,14 @@ func migrateInputImages() {
 			huh.NewSelect[string]().Title("Select target environment:").Options(envOptions...).Value(&dstEnvType),
 		),
 	).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println(internal.InfoStyle.Render("Migration cancelled."))
+			return
+		}
+		internal.Log.Error("Form error: %v", err)
+		return
+	}
 	if srcEnvType == dstEnvType || srcEnvType == "" || dstEnvType == "" {
 		fmt.Println(internal.InfoStyle.Render("Migration cancelled (invalid selection)."))
 		return
@@ -1764,7 +1874,14 @@ func migrateWorkflows() {
 			huh.NewSelect[string]().Title("Select target environment:").Options(envOptions...).Value(&dstEnvType),
 		),
 	).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println(internal.InfoStyle.Render("Migration cancelled."))
+			return
+		}
+		internal.Log.Error("Form error: %v", err)
+		return
+	}
 	if srcEnvType == dstEnvType || srcEnvType == "" || dstEnvType == "" {
 		fmt.Println(internal.InfoStyle.Render("Migration cancelled (invalid selection)."))
 		return
@@ -1919,7 +2036,14 @@ func migrateCustomNodes() {
 			huh.NewSelect[string]().Title("Select target environment:").Options(envOptions...).Value(&dstEnvType),
 		),
 	).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println(internal.InfoStyle.Render("Migration cancelled."))
+			return
+		}
+		internal.Log.Error("Form error: %v", err)
+		return
+	}
 	if srcEnvType == dstEnvType || srcEnvType == "" || dstEnvType == "" {
 		fmt.Println(internal.InfoStyle.Render("Migration cancelled (invalid selection)."))
 		return

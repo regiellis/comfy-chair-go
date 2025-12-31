@@ -280,7 +280,12 @@ func PromptEditEnvFile(path string) error {
 			huh.NewConfirm().Title("Add a new variable?").Value(&addMore),
 		),
 	).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if !errors.Is(err, huh.ErrUserAborted) {
+			Log.Error("Form error: %v", err)
+		}
+		addMore = false
+	}
 	for addMore {
 		var newKey, newVal string
 		form := huh.NewForm(
@@ -303,7 +308,12 @@ func PromptEditEnvFile(path string) error {
 				huh.NewConfirm().Title("Add another variable?").Value(&addMore),
 			),
 		).WithTheme(huh.ThemeCharm())
-		_ = form.Run()
+		if err := form.Run(); err != nil {
+			if !errors.Is(err, huh.ErrUserAborted) {
+				Log.Error("Form error: %v", err)
+			}
+			addMore = false
+		}
 	}
 
 	if err := WriteEnvFile(path, env); err != nil {

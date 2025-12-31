@@ -81,7 +81,14 @@ func ShowMainMenu(choices MenuChoices, appPaths *Paths) {
 					Value(&choice),
 			),
 		).WithTheme(huh.ThemeCharm())
-		_ = form.Run()
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				choice = "exit"
+			} else {
+				Log.Error("Form error: %v", err)
+				choice = "exit"
+			}
+		}
 
 		// Nested menu logic in a loop
 		for {
@@ -134,7 +141,13 @@ func showMainActionsMenu() string {
 				Value(&subChoice),
 		),
 	).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return ""
+		}
+		Log.Error("Form error: %v", err)
+		return ""
+	}
 	if subChoice == "back" || subChoice == "" {
 		return ""
 	}
@@ -166,7 +179,13 @@ func showNodeManagementMenu() string {
 				Value(&subChoice),
 		),
 	).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return ""
+		}
+		Log.Error("Form error: %v", err)
+		return ""
+	}
 	if subChoice == "back" || subChoice == "" {
 		return ""
 	}
@@ -190,7 +209,13 @@ func showEnvironmentManagementMenu() string {
 				Value(&subChoice),
 		),
 	).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return ""
+		}
+		Log.Error("Form error: %v", err)
+		return ""
+	}
 	if subChoice == "back" || subChoice == "" {
 		return ""
 	}
@@ -212,7 +237,13 @@ func showOtherToolsMenu() string {
 				).
 				Value(&toolChoice),
 		)).WithTheme(huh.ThemeCharm())
-		_ = form.Run()
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return ""
+			}
+			Log.Error("Form error: %v", err)
+			return ""
+		}
 		if toolChoice == "back" || toolChoice == "" {
 			return ""
 		}
@@ -349,8 +380,15 @@ func GetReloadSettings(inst *ComfyInstall) (watchDir string, debounce int, exts 
 			form := huh.NewForm(huh.NewGroup(
 				huh.NewMultiSelect[string]().Title("Select custom node directories to watch for reloads:").Options(nodeOptions...).Value(&selected),
 			)).WithTheme(huh.ThemeCharm())
-			_ = form.Run()
-			includedDirs = selected
+			if err := form.Run(); err != nil {
+				if errors.Is(err, huh.ErrUserAborted) {
+					Log.Info("Using default (all directories)")
+				} else {
+					Log.Error("Form error: %v", err)
+				}
+			} else {
+				includedDirs = selected
+			}
 			// Save to comfy-installs.json
 			cfg, _ := LoadGlobalConfig()
 			for i := range cfg.Installs {
@@ -385,16 +423,38 @@ func handleSetWorkingEnv(appPaths *Paths) {
 	}
 	var selectedEnv string
 	form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Select working environment:").Options(envOptions...).Value(&selectedEnv))).WithTheme(huh.ThemeCharm())
-	_ = form.Run()
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println(InfoStyle.Render("Operation cancelled."))
+			return
+		}
+		Log.Error("Form error: %v", err)
+		return
+	}
 	if selectedEnv != "" {
 		inst := cfg.FindInstallByType(InstallType(selectedEnv))
 
 		if inst != nil {
-			UpdateEnvFile(appPaths.EnvFile, map[string]string{
+			// Update .env file
+			err := UpdateEnvFile(appPaths.EnvFile, map[string]string{
 				"WORKING_COMFY_ENV": selectedEnv,
 				"COMFYUI_PATH":      inst.Path,
 			})
+			if err != nil {
+				fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to update .env file: %v", err)))
+				return
+			}
+
+			// Update runtime environment variables for immediate effect
+			os.Setenv("WORKING_COMFY_ENV", selectedEnv)
+			os.Setenv("COMFYUI_PATH", inst.Path)
+
+			// Update appPaths state
+			appPaths.ComfyUIDir = inst.Path
+			appPaths.IsConfigured = true
+
 			fmt.Println(SuccessStyle.Render("Working environment set to: " + selectedEnv + " (" + inst.Path + ")"))
+			fmt.Println(InfoStyle.Render("Environment variables updated. Changes are now active."))
 		} else {
 			fmt.Println(ErrorStyle.Render("Selected environment not found in config."))
 		}
