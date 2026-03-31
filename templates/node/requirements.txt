@@ -1,1 +1,3 @@
-{{Deps}}
+# Basic Node Dependencies
+# This template uses only Python standard library modules
+# Add your custom dependencies here

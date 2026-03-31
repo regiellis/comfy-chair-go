@@ -151,6 +151,8 @@ Comfy Chair **automatically detects and uses Python virtual environments** named
 - **Configurable Live Reload:**
   - `COMFY_RELOAD_EXTS`: Comma-separated file extensions to watch for reloads (default: `.py,.js,.css`).
   - `COMFY_RELOAD_DEBOUNCE`: Debounce time in seconds for reloads (default: `5`).
+- **Configurable Start Flags:**
+  - `COMFY_START_FLAGS`: Extra ComfyUI start flags (space-separated).
 - **Node Management Enhancements:**
   - Confirmation prompt before deleting a node.
   - Node description (`README.md`) shown before deletion.
@@ -173,10 +175,14 @@ COMFYUI_PATH=/path/to/your/ComfyUI
 COMFY_RELOAD_EXTS=.py,.js,.css
 # Debounce time in seconds for reloads (default: 5)
 COMFY_RELOAD_DEBOUNCE=5
+# Extra flags passed to ComfyUI on start (space-separated)
+COMFY_START_FLAGS=--highvram --cuda-malloc
 # GPU type for torch install: nvidia, amd, intel, apple, directml, ascend, cambricon, cpu
 GPU_TYPE=nvidia
-# Python version to use for venv (default: 3.12, 3.13 supported but not all nodes work)
-PYTHON_VERSION=3.12
+# Optional override for Nvidia torch install args after `uv pip`
+TORCH_INSTALL_CMD_NVIDIA=install --index-url https://download.pytorch.org/whl/nightly/cu130 torch torchvision torchaudio
+# Python version to use for venv (default: 3.13)
+PYTHON_VERSION=3.13
 ```
 
 - If `.env` is missing or incomplete, Comfy Chair will prompt you to set it up interactively.
@@ -196,8 +202,15 @@ Comfy Chair will prompt you for your GPU type and Python version during install.
 - **CPU Only**: Installs CPU-only torch
 
 If your GPU type requires manual steps, Comfy Chair will print instructions. You can always re-run the install or update commands to retry or change your GPU type.
+For Nvidia installs, the runtime default is now:
 
-> **Note:** Python 3.12 is recommended. Python 3.13 is supported, but some custom nodes may not work yet.
+```bash
+uv pip install --index-url https://download.pytorch.org/whl/nightly/cu130 torch torchvision torchaudio
+```
+
+If PyTorch moves again, update `TORCH_INSTALL_CMD_NVIDIA` in your `.env` and re-run install. That avoids needing a new Comfy Chair build just to change the recommended torch command.
+
+> **Note:** Python 3.13 is now the recommended default.
 
 ---
 
@@ -279,7 +292,7 @@ This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) 
 ## 🆕 New Features (May 2025)
 
 - **GPU Selection & PyTorch Install:** During install, Comfy Chair prompts for your GPU type (Nvidia, AMD, Intel, Apple, DirectML, Ascend, Cambricon, or CPU) and automatically installs the correct torch/torchvision/torchaudio packages in your venv. Manual instructions are shown for Apple, Ascend, and Cambricon.
-- **Python Version Prompt:** You can select the Python version for your venv (3.12 recommended, 3.13 supported but not all nodes work). This is stored in `.env` as `PYTHON_VERSION`.
+- **Python Version Prompt:** You can select the Python version for your venv (3.13 recommended). This is stored in `.env` as `PYTHON_VERSION`.
 - **.env Variables:** `.env` and `.env.example` now include `GPU_TYPE` and `PYTHON_VERSION` for reproducible, portable installs.
 - **Robust venv Creation:** If `uv` is not available, the installer falls back to `python -m venv` and `pip` for all venv and dependency operations.
 - **Improved Install UX:** All prompts and logic are available in both CLI and TUI modes, with clear user feedback and error handling.

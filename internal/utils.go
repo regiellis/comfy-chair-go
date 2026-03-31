@@ -9,14 +9,15 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/joho/godotenv"
 )
 
-// Global state for dry-run mode
-var dryRunMode bool
+// Global state for dry-run mode (thread-safe via atomic operations)
+var dryRunMode atomic.Bool
 
 // Styles (exported)
 var (
@@ -405,19 +406,24 @@ func HandleFormError(err error, operationName string) bool {
 
 // Dry-run utility functions
 
-// SetDryRunMode sets the global dry-run mode state
+// SetDryRunMode sets the global dry-run mode state (thread-safe)
 func SetDryRunMode(enabled bool) {
-	dryRunMode = enabled
+	dryRunMode.Store(enabled)
 }
 
-// IsDryRun returns whether dry-run mode is currently enabled
+// IsDryRunMode returns whether dry-run mode is currently enabled (thread-safe)
+func IsDryRunMode() bool {
+	return dryRunMode.Load()
+}
+
+// IsDryRun is an alias for IsDryRunMode for backward compatibility
 func IsDryRun() bool {
-	return dryRunMode
+	return IsDryRunMode()
 }
 
 // DryRunLog logs what would happen in dry-run mode
 func DryRunLog(action string, args ...interface{}) {
-	if dryRunMode {
+	if IsDryRunMode() {
 		message := fmt.Sprintf(action, args...)
 		Log.Warning("DRY RUN: %s", message)
 	}
@@ -426,11 +432,11 @@ func DryRunLog(action string, args ...interface{}) {
 // DryRunExecute executes an action only if not in dry-run mode
 func DryRunExecute(action string, fn func() error, args ...interface{}) error {
 	message := fmt.Sprintf(action, args...)
-	
-	if dryRunMode {
+
+	if IsDryRunMode() {
 		Log.Warning("DRY RUN: %s", message)
 		return nil
 	}
-	
+
 	return fn()
 }

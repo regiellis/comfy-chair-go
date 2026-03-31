@@ -1,1 +1,3 @@
-aiohttp
+# Web API Node Dependencies
+aiohttp>=3.8.0
+# Add your web API dependencies here

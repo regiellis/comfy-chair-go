@@ -1,0 +1,20 @@
+{
+    "name": "{{NodeName}}",
+    "version": "{{Version}}",
+    "author": "{{Author}}",
+    "description": "{{NodeDesc}}",
+    "license": "MIT",
+    "repository": "https://github.com/{{PubID}}/{{NodeNameLower}}",
+    "node_class_mappings": [
+        "{{NodeName}}"
+    ],
+    "dependencies": {
+        "python": ">=3.10",
+        "requirements": "requirements.txt"
+    },
+    "comfy_version": ">=0.2.0",
+    "tags": [
+        "custom-node",
+        "basic"
+    ]
+}

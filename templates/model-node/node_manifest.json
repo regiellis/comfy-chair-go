@@ -1,0 +1,29 @@
+{
+    "name": "{{NodeName}}",
+    "version": "{{Version}}",
+    "author": "{{Author}}",
+    "description": "{{NodeDesc}}",
+    "license": "MIT",
+    "repository": "https://github.com/{{PubID}}/{{NodeNameLower}}",
+    "node_class_mappings": [
+        "{{NodeName}}"
+    ],
+    "dependencies": {
+        "python": ">=3.10",
+        "requirements": "requirements.txt",
+        "packages": [
+            "torch>=2.0.0",
+            "safetensors>=0.3.0",
+            "transformers>=4.25.0",
+            "diffusers>=0.20.0",
+            "onnxruntime>=1.15.0"
+        ]
+    },
+    "comfy_version": ">=0.2.0",
+    "tags": [
+        "custom-node",
+        "model-loader",
+        "ml",
+        "inference"
+    ]
+}

@@ -265,8 +265,6 @@ func initPaths() error {
 	return nil
 }
 
-
-
 func startComfyUI(background bool) {
 	inst, err := internal.GetActiveComfyInstall()
 	if err != nil {
@@ -316,7 +314,13 @@ func startComfyUI(background bool) {
 	}
 
 	args := []string{"-s", mainPy, "--listen", "--port", fmt.Sprintf("%d", chosenPort), "--preview-method", "auto", "--front-end-version", "Comfy-Org/ComfyUI_frontend@latest"}
-	
+	extraFlags := strings.TrimSpace(os.Getenv(internal.ComfyStartFlagsKey))
+	if extraFlags == "" {
+		args = append(args, "--cuda-malloc")
+	} else {
+		args = append(args, strings.Fields(extraFlags)...)
+	}
+
 	// Measure startup time if running in background
 	var startupTime time.Duration
 	var process *os.Process
@@ -329,22 +333,22 @@ func startComfyUI(background bool) {
 			return
 		}
 		startupTime = time.Since(startTime)
-		
+
 		// Record performance metric
 		inst, _ := internal.GetActiveComfyInstall()
 		envType := "unknown"
 		if inst != nil {
 			envType = string(inst.Type)
 		}
-		
+
 		// Wait a bit for the process to fully initialize
 		time.Sleep(3 * time.Second)
-		
+
 		memUsage, _ := internal.GetCurrentMemoryUsage(process.Pid)
 		customNodesPath := filepath.Join(comfyDir, "custom_nodes")
 		nodeCount := internal.CountCustomNodes(customNodesPath)
 		logSize := internal.GetLogSize(logFile)
-		
+
 		metric := internal.PerformanceMetric{
 			Timestamp:       time.Now(),
 			Environment:     envType,
@@ -355,7 +359,7 @@ func startComfyUI(background bool) {
 			LogSizeMB:       logSize,
 			CustomNodeCount: nodeCount,
 		}
-		
+
 		// Record the metric (ignore errors to not interrupt startup)
 		_ = internal.RecordPerformanceMetric(metric)
 	} else {
@@ -405,122 +409,359 @@ func updateComfyUI() {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("python executable not found in 'venv' or '.venv' under %s. Please ensure ComfyUI is installed correctly and the venv is set up.", comfyDir)))
 		return
 	}
-	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Updating ComfyUI at %s...", comfyDir)))
-	fmt.Println(internal.InfoStyle.Render("Pulling latest changes from Git..."))
-	pullOut, err := internal.ExecuteCommand("git", []string{"pull", "origin", "master"}, comfyDir, "", false)
+
+	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Updating ComfyUI (stable) at %s...", comfyDir)))
+	proceed, stashed, err := ensureGitCleanOrStash(comfyDir)
 	if err != nil {
-		pullOutput := ""
-		if pullOut != nil {
-			pullOutput = fmt.Sprintf("%v", pullOut)
-		}
-		unstaged := false
-		if strings.Contains(pullOutput, "would be overwritten by merge") ||
-			strings.Contains(pullOutput, "Please commit your changes or stash them") ||
-			strings.Contains(pullOutput, "error: Your local changes to the following files would be overwritten") {
-			unstaged = true
-		}
-		if unstaged {
-			fmt.Println(internal.ErrorStyle.Render("Git pull failed due to unstaged or conflicting changes in your ComfyUI directory."))
-			fmt.Println(internal.WarningStyle.Render("You must resolve these changes before updating. Choose an action:"))
-			var action string
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewSelect[string]().
-						Title("How would you like to proceed?").
-						Description("Unstaged changes detected. Stash, abort, or resolve manually?").
-						Options(
-							huh.NewOption("Stash changes and retry update", "stash"),
-							huh.NewOption("Abort update", "abort"),
-							huh.NewOption("I'll resolve manually, then retry", "manual"),
-						).
-						Value(&action),
-				),
-			).WithTheme(huh.ThemeCharm())
-			if err := form.Run(); err != nil {
-				if errors.Is(err, huh.ErrUserAborted) {
-					fmt.Println(internal.InfoStyle.Render("Update cancelled."))
-					return
-				}
-				internal.Log.Error("Form error: %v", err)
-				return
-			}
-			switch action {
-			case "stash":
-				fmt.Println(internal.InfoStyle.Render("Stashing local changes..."))
-				_, stashErr := internal.ExecuteCommand("git", []string{"stash"}, comfyDir, "", false)
-				if stashErr != nil {
-					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to stash changes: %v", stashErr)))
-					return
-				}
-				fmt.Println(internal.SuccessStyle.Render("Changes stashed. Retrying update..."))
-				_, err2 := internal.ExecuteCommand("git", []string{"pull", "origin", "master"}, comfyDir, "", false)
-				if err2 != nil {
-					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Git pull still failed: %v", err2)))
-					return
-				}
-				fmt.Println(internal.SuccessStyle.Render("Git pull successful after stashing."))
-				var popStash bool
-				form2 := huh.NewForm(
-					huh.NewGroup(
-						huh.NewConfirm().
-							Title("Would you like to apply (pop) your stashed changes now?").
-							Value(&popStash),
-					),
-				).WithTheme(huh.ThemeCharm())
-				_ = form2.Run()
-				if popStash {
-					fmt.Println(internal.InfoStyle.Render("Applying stashed changes..."))
-					_, popErr := internal.ExecuteCommand("git", []string{"stash", "pop"}, comfyDir, "", false)
-					if popErr != nil {
-						fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to pop stash: %v", popErr)))
-					} else {
-						fmt.Println(internal.SuccessStyle.Render("Stashed changes applied."))
-					}
-				} else {
-					fmt.Println(internal.InfoStyle.Render("You can apply your stashed changes later with 'git stash pop' in your ComfyUI directory."))
-				}
-			case "abort":
-				fmt.Println(internal.InfoStyle.Render("Update aborted. No changes made."))
-				return
-			default:
-				fmt.Println(internal.InfoStyle.Render("Please resolve the git issue in your ComfyUI directory, then retry the update."))
-				return
-			}
-		} else {
-			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update ComfyUI (git pull): %v", err)))
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to check git status: %v", err)))
+		return
+	}
+	if !proceed {
+		return
+	}
+
+	if err := fetchComfyTags(comfyDir); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to fetch tags: %v", err)))
+		return
+	}
+
+	tag, err := getLatestStableTag(comfyDir)
+	if err != nil || tag == "" {
+		fmt.Println(internal.WarningStyle.Render("No stable tag found. Falling back to nightly update (default branch)."))
+		if err := updateComfyUINightlyInternal(comfyDir); err != nil {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Nightly update failed: %v", err)))
 			return
 		}
 	} else {
-		fmt.Println(internal.SuccessStyle.Render("Git pull successful."))
+		fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Checking out latest stable tag: %s", tag)))
+		if err := checkoutGitRef(comfyDir, tag); err != nil {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to checkout tag %s: %v", tag, err)))
+			return
+		}
+		fmt.Println(internal.SuccessStyle.Render("ComfyUI updated to latest stable tag."))
 	}
+
+	if err := updateComfyDepsWithUV(comfyDir, venvPython); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(err.Error()))
+		return
+	}
+	maybePopStash(comfyDir, stashed)
+	internal.PromptReturnToMenu()
+}
+
+func updateComfyUINightly() {
+	inst, err := internal.GetActiveComfyInstall()
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(err.Error()))
+		return
+	}
+	comfyDir := inst.Path
+	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(comfyDir))
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("python executable not found in 'venv' or '.venv' under %s. Please ensure ComfyUI is installed correctly and the venv is set up.", comfyDir)))
+		return
+	}
+
+	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Updating ComfyUI (nightly) at %s...", comfyDir)))
+	proceed, stashed, err := ensureGitCleanOrStash(comfyDir)
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to check git status: %v", err)))
+		return
+	}
+	if !proceed {
+		return
+	}
+
+	if err := updateComfyUINightlyInternal(comfyDir); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Nightly update failed: %v", err)))
+		return
+	}
+
+	if err := updateComfyDepsWithUV(comfyDir, venvPython); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(err.Error()))
+		return
+	}
+	maybePopStash(comfyDir, stashed)
+	internal.PromptReturnToMenu()
+}
+
+func downgradeComfyUI() {
+	inst, err := internal.GetActiveComfyInstall()
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(err.Error()))
+		return
+	}
+	comfyDir := inst.Path
+	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(comfyDir))
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("python executable not found in 'venv' or '.venv' under %s. Please ensure ComfyUI is installed correctly and the venv is set up.", comfyDir)))
+		return
+	}
+
+	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Downgrading ComfyUI at %s...", comfyDir)))
+	proceed, stashed, err := ensureGitCleanOrStash(comfyDir)
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to check git status: %v", err)))
+		return
+	}
+	if !proceed {
+		return
+	}
+
+	if err := fetchComfyTags(comfyDir); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to fetch tags: %v", err)))
+		return
+	}
+	tags, err := listComfyTags(comfyDir)
+	if err != nil || len(tags) == 0 {
+		fmt.Println(internal.ErrorStyle.Render("No tags found to downgrade to."))
+		return
+	}
+
+	tag, err := promptTagSelection(tags)
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to select a tag: %v", err)))
+		return
+	}
+	if tag == "" {
+		fmt.Println(internal.InfoStyle.Render("Downgrade cancelled."))
+		return
+	}
+
+	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Checking out tag: %s", tag)))
+	if err := checkoutGitRef(comfyDir, tag); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to checkout tag %s: %v", tag, err)))
+		return
+	}
+	fmt.Println(internal.SuccessStyle.Render("ComfyUI downgraded successfully."))
+
+	if err := updateComfyDepsWithUV(comfyDir, venvPython); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(err.Error()))
+		return
+	}
+	maybePopStash(comfyDir, stashed)
+	internal.PromptReturnToMenu()
+}
+
+func ensureGitCleanOrStash(comfyDir string) (bool, bool, error) {
+	if internal.IsDryRun() {
+		internal.DryRunLog("Would check git status in %s", comfyDir)
+		return true, false, nil
+	}
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = internal.ExpandUserPath(comfyDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, false, fmt.Errorf("git status failed: %w", err)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return true, false, nil
+	}
+
+	fmt.Println(internal.ErrorStyle.Render("Unstaged or uncommitted changes detected in your ComfyUI directory."))
+	fmt.Println(internal.WarningStyle.Render("Choose how to proceed:"))
+	var action string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("How would you like to proceed?").
+				Description("Stash, abort, or resolve manually?").
+				Options(
+					huh.NewOption("Stash changes and continue", "stash"),
+					huh.NewOption("Abort update", "abort"),
+					huh.NewOption("I'll resolve manually, then retry", "manual"),
+				).
+				Value(&action),
+		),
+	).WithTheme(huh.ThemeCharm())
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println(internal.InfoStyle.Render("Operation cancelled."))
+			return false, false, nil
+		}
+		return false, false, err
+	}
+
+	switch action {
+	case "stash":
+		fmt.Println(internal.InfoStyle.Render("Stashing local changes..."))
+		if _, err := internal.ExecuteCommand("git", []string{"stash"}, comfyDir, "", false); err != nil {
+			return false, false, fmt.Errorf("failed to stash changes: %w", err)
+		}
+		fmt.Println(internal.SuccessStyle.Render("Changes stashed."))
+		return true, true, nil
+	case "abort":
+		fmt.Println(internal.InfoStyle.Render("Operation aborted. No changes made."))
+		return false, false, nil
+	default:
+		fmt.Println(internal.InfoStyle.Render("Please resolve the git issue in your ComfyUI directory, then retry."))
+		return false, false, nil
+	}
+}
+
+func maybePopStash(comfyDir string, stashed bool) {
+	if !stashed {
+		return
+	}
+	var popStash bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Would you like to apply (pop) your stashed changes now?").
+				Value(&popStash),
+		),
+	).WithTheme(huh.ThemeCharm())
+	_ = form.Run()
+	if popStash {
+		fmt.Println(internal.InfoStyle.Render("Applying stashed changes..."))
+		if _, popErr := internal.ExecuteCommand("git", []string{"stash", "pop"}, comfyDir, "", false); popErr != nil {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to pop stash: %v", popErr)))
+		} else {
+			fmt.Println(internal.SuccessStyle.Render("Stashed changes applied."))
+		}
+	} else {
+		fmt.Println(internal.InfoStyle.Render("You can apply your stashed changes later with 'git stash pop' in your ComfyUI directory."))
+	}
+}
+
+func fetchComfyTags(comfyDir string) error {
+	_, err := internal.ExecuteCommand("git", []string{"fetch", "--tags", "origin"}, comfyDir, "", false)
+	return err
+}
+
+func listComfyTags(comfyDir string) ([]string, error) {
+	if internal.IsDryRun() {
+		internal.DryRunLog("Would list git tags in %s", comfyDir)
+		return []string{"v0.0.0"}, nil
+	}
+	cmd := exec.Command("git", "tag", "--list", "--sort=-v:refname")
+	cmd.Dir = internal.ExpandUserPath(comfyDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var tags []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			tags = append(tags, strings.TrimSpace(line))
+		}
+	}
+	return tags, nil
+}
+
+func getLatestStableTag(comfyDir string) (string, error) {
+	tags, err := listComfyTags(comfyDir)
+	if err != nil || len(tags) == 0 {
+		return "", err
+	}
+	for _, tag := range tags {
+		if strings.HasPrefix(tag, "v") {
+			return tag, nil
+		}
+	}
+	return tags[0], nil
+}
+
+func promptTagSelection(tags []string) (string, error) {
+	var choice string
+	options := make([]huh.Option[string], 0, len(tags))
+	for _, tag := range tags {
+		options = append(options, huh.NewOption(tag, tag))
+	}
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Select a ComfyUI tag").
+				Options(options...).
+				Value(&choice),
+		),
+	).WithTheme(huh.ThemeCharm())
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return "", nil
+		}
+		return "", err
+	}
+	return choice, nil
+}
+
+func getOriginHeadBranch(comfyDir string) (string, error) {
+	if internal.IsDryRun() {
+		internal.DryRunLog("Would determine origin/HEAD in %s", comfyDir)
+		return "master", nil
+	}
+	cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD")
+	cmd.Dir = internal.ExpandUserPath(comfyDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	ref := strings.TrimSpace(string(out))
+	if ref == "" {
+		return "", fmt.Errorf("origin/HEAD is empty")
+	}
+	parts := strings.Split(ref, "/")
+	return parts[len(parts)-1], nil
+}
+
+func updateComfyUINightlyInternal(comfyDir string) error {
+	if _, err := internal.ExecuteCommand("git", []string{"fetch", "origin"}, comfyDir, "", false); err != nil {
+		return err
+	}
+	branch, err := getOriginHeadBranch(comfyDir)
+	if err != nil || branch == "" {
+		branch = "master"
+	}
+	if _, err := internal.ExecuteCommand("git", []string{"checkout", branch}, comfyDir, "", false); err != nil {
+		if _, err2 := internal.ExecuteCommand("git", []string{"checkout", "-b", branch, "origin/" + branch}, comfyDir, "", false); err2 != nil {
+			return err
+		}
+	}
+	if _, err := internal.ExecuteCommand("git", []string{"pull", "--ff-only", "origin", branch}, comfyDir, "", false); err != nil {
+		return err
+	}
+	fmt.Println(internal.SuccessStyle.Render("ComfyUI updated to latest nightly."))
+	return nil
+}
+
+func checkoutGitRef(comfyDir, ref string) error {
+	_, err := internal.ExecuteCommand("git", []string{"checkout", ref}, comfyDir, "", false)
+	return err
+}
+
+func updateComfyDepsWithUV(comfyDir, venvPython string) error {
 	fmt.Println(internal.InfoStyle.Render("Updating Python dependencies..."))
 	reqTxt := internal.ExpandUserPath(filepath.Join(comfyDir, "requirements.txt"))
 	if _, err := os.Stat(reqTxt); os.IsNotExist(err) {
 		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("requirements.txt not found at %s. Skipping dependency update.", reqTxt)))
 		fmt.Println(internal.SuccessStyle.Render("ComfyUI core updated. Dependency update skipped."))
-		return
+		return nil
 	}
-	uvPath, err := exec.LookPath("uv")
-	if err == nil {
-		args := []string{"pip", "install", "-r", reqTxt}
-		_, err = internal.ExecuteCommand(uvPath, args, comfyDir, "", false)
-		if err != nil {
-			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update dependencies (uv pip install): %v", err)))
-			return
-		}
-		fmt.Println(internal.SuccessStyle.Render("ComfyUI and dependencies updated successfully."))
-		internal.PromptReturnToMenu()
-		return
+
+	uvExec := resolveUvForVenv(venvPython)
+	if uvExec == "" {
+		return fmt.Errorf("uv not found. Install uv to update dependencies without damaging the environment")
 	}
-	// Fallback to venvPython if uv is not found
+
 	args := []string{"pip", "install", "-r", reqTxt}
-	_, err = internal.ExecuteCommand(venvPython, args, comfyDir, "", false)
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update dependencies (pip install): %v", err)))
-		return
+	if _, err := internal.ExecuteCommand(uvExec, args, comfyDir, "", false); err != nil {
+		return fmt.Errorf("failed to update dependencies (uv pip install): %w", err)
 	}
 	fmt.Println(internal.SuccessStyle.Render("ComfyUI and dependencies updated successfully."))
-	internal.PromptReturnToMenu()
+	return nil
+}
+
+func resolveUvForVenv(venvPython string) string {
+	venvBin := filepath.Dir(venvPython)
+	uvPath := filepath.Join(venvBin, "uv")
+	if stat, err := os.Stat(uvPath); err == nil && !stat.IsDir() {
+		return uvPath
+	}
+	if uvSys, err := exec.LookPath("uv"); err == nil {
+		return uvSys
+	}
+	return ""
 }
 
 // promptEnvironmentType prompts the user to select an environment type
@@ -537,15 +778,15 @@ func promptEnvironmentType() (string, error) {
 			).
 			Value(&envType),
 	)).WithTheme(huh.ThemeCharm())
-	
+
 	if err := formEnv.Run(); err != nil {
 		return "", fmt.Errorf("failed to get environment type: %w", err)
 	}
-	
+
 	if envType == "" {
 		return "", fmt.Errorf("no environment type selected")
 	}
-	
+
 	return envType, nil
 }
 
@@ -555,21 +796,21 @@ func promptInstallationPath() (string, error) {
 	formPath := huh.NewForm(huh.NewGroup(
 		huh.NewInput().Title("Enter the full desired path for your ComfyUI installation").Value(&installPath),
 	)).WithTheme(huh.ThemeCharm())
-	
+
 	if err := formPath.Run(); err != nil {
 		return "", fmt.Errorf("failed to get installation path: %w", err)
 	}
-	
+
 	installPath = strings.TrimSpace(installPath)
 	if installPath == "" {
 		return "", fmt.Errorf("installation path cannot be empty")
 	}
-	
+
 	installPath, err := filepath.Abs(installPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to get absolute path: %w", err)
 	}
-	
+
 	return installPath, nil
 }
 
@@ -617,9 +858,9 @@ func installComfyUI() {
 		gpuType = gpuOpt
 	}
 	if pythonVersion == "" {
-		var pyVer string = "3.12"
+		var pyVer string = internal.DefaultPythonVersion
 		form := huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("Python version for venv (3.12 recommended, 3.13 supported)").Value(&pyVer).Placeholder("3.12"),
+			huh.NewInput().Title("Python version for venv (3.13 recommended)").Value(&pyVer).Placeholder(internal.DefaultPythonVersion),
 		)).WithTheme(huh.ThemeCharm())
 		if internal.HandleFormError(form.Run(), "Python version selection") {
 			return
@@ -704,7 +945,10 @@ func installComfyUI() {
 					}
 				}
 				fmt.Println(internal.WarningStyle.Render("Deleting existing install..."))
-				_ = os.RemoveAll(internal.ExpandUserPath(installPath))
+				if err := os.RemoveAll(internal.ExpandUserPath(installPath)); err != nil {
+					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to remove existing install: %v", err)))
+					return
+				}
 			}
 		}
 		// If not ComfyUI, but dir exists, prompt to replace or cancel
@@ -723,7 +967,10 @@ func installComfyUI() {
 				fmt.Println(internal.InfoStyle.Render("Installation cancelled."))
 				return
 			}
-			_ = os.RemoveAll(internal.ExpandUserPath(installPath))
+			if err := os.RemoveAll(internal.ExpandUserPath(installPath)); err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to remove existing directory: %v", err)))
+				return
+			}
 		}
 	}
 
@@ -988,8 +1235,8 @@ func installComfyUI() {
 
 	if err := confirmForm.Run(); err == nil && updateEnv {
 		envUpdates := map[string]string{
-			"COMFYUI_PATH":       realComfyPath,
-			"WORKING_COMFY_ENV":  envType,
+			"COMFYUI_PATH":      realComfyPath,
+			"WORKING_COMFY_ENV": envType,
 		}
 
 		// Check if .env exists
@@ -1022,16 +1269,6 @@ func installComfyUI() {
 		fmt.Println(internal.InfoStyle.Render("To make it active later, use the 'set active' or 'set_working_env' command."))
 	}
 }
-
-
-
-
-
-
-
-
-
-
 
 func removeEnv() {
 	// Prompt for environment to remove
@@ -1105,7 +1342,9 @@ func printUsage() {
 	fmt.Println("  background, start-bg              Start ComfyUI in background")
 	fmt.Println("  stop                              Stop ComfyUI")
 	fmt.Println("  restart                           Restart ComfyUI")
-	fmt.Println("  update                            Update ComfyUI")
+	fmt.Println("  update                            Update ComfyUI to latest stable tag")
+	fmt.Println("  nightly                           Update ComfyUI to latest nightly")
+	fmt.Println("  downgrade                         Downgrade ComfyUI to a selected tag")
 	fmt.Println("  reload                            Watch for changes and reload ComfyUI")
 	fmt.Println("  create-node                       Scaffold a new custom node")
 	fmt.Println("  list-nodes                        List all custom nodes")
@@ -1137,6 +1376,8 @@ func main() {
 		stopComfyUIWithEnv,
 		restartComfyUIWithEnv,
 		updateComfyUIWithEnv,
+		updateComfyUINightlyWithEnv,
+		downgradeComfyUIWithEnv,
 		statusComfyUIWithEnv,
 		installComfyUI,
 		createNewNode,
@@ -1146,9 +1387,9 @@ func main() {
 		updateCustomNodes,
 		migrateCustomNodes,
 		migrateWorkflows,
-		migrateInputImages, // Changed from migrateImages
-		addOrRemoveNodeWorkflows, // Changed from nodeWorkflows
-		removeEnv, // Changed from removeEnvironment
+		migrateInputImages,                  // Changed from migrateImages
+		addOrRemoveNodeWorkflows,            // Changed from nodeWorkflows
+		removeEnv,                           // Changed from removeEnvironment
 		func() { _ = syncEnvWithExample() }, // Changed from syncEnvFile
 	)
 
@@ -1175,6 +1416,12 @@ func main() {
 			return
 		case "update":
 			internal.RunWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) })
+			return
+		case "nightly", "update-nightly", "nightly-update":
+			internal.RunWithEnvConfirmation("nightly", func(inst *internal.ComfyInstall) { updateComfyUINightlyWithEnv(inst) })
+			return
+		case "downgrade", "update-downgrade":
+			internal.RunWithEnvConfirmation("downgrade", func(inst *internal.ComfyInstall) { downgradeComfyUIWithEnv(inst) })
 			return
 		case "reload":
 			inst, err := internal.GetActiveComfyInstall()
@@ -1220,16 +1467,25 @@ func main() {
 						includedDirs = selected
 					}
 					// Save to comfy-installs.json
-					cfg, _ := internal.LoadGlobalConfig()
-					for i := range cfg.Installs {
-						if cfg.Installs[i].Type == inst.Type {
-							cfg.Installs[i].ReloadIncludeDirs = includedDirs
+					cfg, err := internal.LoadGlobalConfig()
+					if err != nil {
+						internal.Log.Error("Failed to load config: %v", err)
+					} else {
+						for i := range cfg.Installs {
+							if cfg.Installs[i].Type == inst.Type {
+								cfg.Installs[i].ReloadIncludeDirs = includedDirs
+							}
+						}
+						if err := internal.SaveGlobalConfig(cfg); err != nil {
+							internal.Log.Error("Failed to save reload directory config: %v", err)
 						}
 					}
-					_ = internal.SaveGlobalConfig(cfg)
 				}
 			}
-			reloadComfyUI(watchDir, debounce, exts, includedDirs)
+			if err := reloadComfyUI(watchDir, debounce, exts, includedDirs); err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Reload failed: %v", err)))
+				os.Exit(1)
+			}
 			return
 		case "install":
 			installComfyUI()
@@ -1287,6 +1543,8 @@ func main() {
 		Stop:             func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) },
 		Restart:          func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) },
 		Update:           func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) },
+		UpdateNightly:    func(inst *internal.ComfyInstall) { updateComfyUINightlyWithEnv(inst) },
+		Downgrade:        func(inst *internal.ComfyInstall) { downgradeComfyUIWithEnv(inst) },
 		Install:          installComfyUI,
 		CreateNode:       createNewNode,
 		ListNodes:        listCustomNodes,
@@ -1327,7 +1585,9 @@ func handleReloadFunction() {
 		return
 	}
 	watchDir, debounce, exts, includedDirs := internal.GetReloadSettings(inst)
-	reloadComfyUI(watchDir, debounce, exts, includedDirs)
+	if err := reloadComfyUI(watchDir, debounce, exts, includedDirs); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Reload failed: %v", err)))
+	}
 }
 
 // handleWatchNodesFunction handles the watch nodes functionality
@@ -1338,7 +1598,7 @@ func handleWatchNodesFunction() {
 		os.Exit(1)
 	}
 	customNodesDir := internal.ExpandUserPath(filepath.Join(inst.Path, "custom_nodes"))
-	
+
 	selected, err := internal.SelectNodeDirectories(customNodesDir)
 	if err != nil {
 		if strings.Contains(err.Error(), "cancelled") {
@@ -1352,7 +1612,7 @@ func handleWatchNodesFunction() {
 		fmt.Println(internal.ErrorStyle.Render(err.Error()))
 		os.Exit(1)
 	}
-	
+
 	// Save to comfy-installs.json
 	cfg, _ := internal.LoadGlobalConfig()
 	for i := range cfg.Installs {
@@ -1411,7 +1671,6 @@ func handleSetWorkingEnvFunction() {
 	}
 }
 
-
 // waitForComfyUIReady waits for ComfyUI to be ready by checking the log file for a specific string.
 func waitForComfyUIReady() error {
 	startTime := time.Now()
@@ -1448,7 +1707,6 @@ func waitForComfyUIStop(pid int) error {
 	}
 }
 
-
 // startComfyUIWithEnv starts ComfyUI for the given environment, foreground/background.
 func startComfyUIWithEnv(inst *internal.ComfyInstall, background bool) {
 	oldDir := appPaths.ComfyUIDir
@@ -1463,6 +1721,22 @@ func updateComfyUIWithEnv(inst *internal.ComfyInstall) {
 	appPaths.ComfyUIDir = inst.Path
 	defer func() { appPaths.ComfyUIDir = oldDir }()
 	updateComfyUI()
+}
+
+// updateComfyUINightlyWithEnv updates ComfyUI nightly for the given environment.
+func updateComfyUINightlyWithEnv(inst *internal.ComfyInstall) {
+	oldDir := appPaths.ComfyUIDir
+	appPaths.ComfyUIDir = inst.Path
+	defer func() { appPaths.ComfyUIDir = oldDir }()
+	updateComfyUINightly()
+}
+
+// downgradeComfyUIWithEnv downgrades ComfyUI to a selected tag for the given environment.
+func downgradeComfyUIWithEnv(inst *internal.ComfyInstall) {
+	oldDir := appPaths.ComfyUIDir
+	appPaths.ComfyUIDir = inst.Path
+	defer func() { appPaths.ComfyUIDir = oldDir }()
+	downgradeComfyUI()
 }
 
 // stopComfyUIWithEnv stops ComfyUI for the given environment.
@@ -1607,7 +1881,9 @@ func manageBrandedEnvironments() {
 					Title(fmt.Sprintf("Manage %s:", labels[envType])).
 					Options(
 						huh.NewOption("Set as Default", "set_default"),
-						huh.NewOption("Update", "update"),
+						huh.NewOption("Update (Stable)", "update"),
+						huh.NewOption("Update (Nightly)", "nightly"),
+						huh.NewOption("Downgrade (Select Tag)", "downgrade"),
 						huh.NewOption("Remove (Disconnect)", "remove"),
 						huh.NewOption("Back", "back"),
 					).
@@ -1634,6 +1910,10 @@ func manageBrandedEnvironments() {
 			fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("%s set as default environment.", labels[envType])))
 		case "update":
 			updateComfyUIWithEnv(inst)
+		case "nightly":
+			updateComfyUINightlyWithEnv(inst)
+		case "downgrade":
+			downgradeComfyUIWithEnv(inst)
 		case "remove":
 			removeEnv()
 			return

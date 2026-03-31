@@ -294,7 +294,9 @@ func createNewNode() {
 
 	// Auto-generate minimal example workflow JSON for the new node
 	exampleDir := filepath.Join(nodeDir, "example_workflows")
-	_ = os.MkdirAll(exampleDir, 0755)
+	if err := os.MkdirAll(exampleDir, 0755); err != nil {
+		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to create example workflows directory: %v", err)))
+	}
 	examplePath := filepath.Join(exampleDir, nodeName+"_example.json")
 	// Minimal workflow: one node, one output, default input values
 	type Workflow struct {
@@ -324,8 +326,11 @@ func createNewNode() {
 		Extra: map[string]any{"description": "Auto-generated example workflow for node '" + nodeName + "'. Edit as needed."},
 	}
 	if data, err := json.MarshalIndent(workflow, "", "  "); err == nil {
-		_ = os.WriteFile(examplePath, data, 0644)
-		fmt.Println(internal.InfoStyle.Render("Example workflow created at: " + examplePath))
+		if err := os.WriteFile(examplePath, data, 0644); err != nil {
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to write example workflow: %v", err)))
+		} else {
+			fmt.Println(internal.InfoStyle.Render("Example workflow created at: " + examplePath))
+		}
 	} else {
 		fmt.Println(internal.WarningStyle.Render("Failed to create example workflow JSON: " + err.Error()))
 	}
@@ -338,7 +343,9 @@ func createNewNode() {
 			// Only add if not already present
 			if !slices.Contains(inst.CustomNodes, nodeName) {
 				inst.CustomNodes = append(inst.CustomNodes, nodeName)
-				_ = internal.SaveGlobalConfig(cfg)
+				if err := internal.SaveGlobalConfig(cfg); err != nil {
+					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to update config with new node: %v", err)))
+				}
 			}
 		}
 	}
@@ -527,7 +534,9 @@ func deleteCustomNode() {
 				}
 			}
 			inst.CustomNodes = newNodes
-			_ = internal.SaveGlobalConfig(cfg)
+			if err := internal.SaveGlobalConfig(cfg); err != nil {
+				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to update config after node deletion: %v", err)))
+			}
 		}
 	}
 	internal.PromptReturnToMenu()
@@ -880,7 +889,10 @@ func addOrRemoveNodeWorkflows() {
 	{
 		data, err := os.ReadFile(trackingFile)
 		if err == nil {
-			_ = json.Unmarshal(data, &tracking)
+			if err := json.Unmarshal(data, &tracking); err != nil {
+				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to parse tracking file, starting fresh: %v", err)))
+				tracking = make(nodeWorkflowMap)
+			}
 		} else {
 			tracking = make(nodeWorkflowMap)
 		}
@@ -908,8 +920,11 @@ func addOrRemoveNodeWorkflows() {
 			}
 		}
 		tracking[nodeName] = append(tracking[nodeName], selected...)
-		data, _ := json.MarshalIndent(tracking, "", "  ")
-		_ = os.WriteFile(trackingFile, data, 0644)
+		if data, err := json.MarshalIndent(tracking, "", "  "); err != nil {
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to marshal tracking data: %v", err)))
+		} else if err := os.WriteFile(trackingFile, data, 0644); err != nil {
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to save workflow tracking file: %v", err)))
+		}
 		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Added workflows to main workflows folder: %v", added)))
 	} else if action == "remove" {
 		removed := []string{}
@@ -929,8 +944,11 @@ func addOrRemoveNodeWorkflows() {
 				}
 			}
 			tracking[nodeName] = newWfs
-			data, _ := json.MarshalIndent(tracking, "", "  ")
-			_ = os.WriteFile(trackingFile, data, 0644)
+			if data, err := json.MarshalIndent(tracking, "", "  "); err != nil {
+				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to marshal tracking data: %v", err)))
+			} else if err := os.WriteFile(trackingFile, data, 0644); err != nil {
+				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to save workflow tracking file: %v", err)))
+			}
 		}
 		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Removed workflows from main workflows folder: %v", removed)))
 	}

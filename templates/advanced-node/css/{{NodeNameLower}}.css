@@ -1,0 +1,402 @@
+/**
+ * {{NodeName}} - Custom Stylesheet
+ *
+ * Styles for the {{NodeName}} ComfyUI node interface.
+ * This CSS is loaded automatically when the node is registered.
+ *
+ * Author: {{Author}}
+ */
+
+/* ============================================================================
+   CSS Variables - Theme Configuration
+   ============================================================================ */
+
+:root {
+    /* Primary colors */
+    --{{NodeNameLower}}-primary: #4a9eff;
+    --{{NodeNameLower}}-primary-hover: #3a8eef;
+    --{{NodeNameLower}}-primary-active: #2a7edf;
+
+    /* Secondary colors */
+    --{{NodeNameLower}}-secondary: #6c757d;
+    --{{NodeNameLower}}-secondary-hover: #5c656d;
+
+    /* Background colors */
+    --{{NodeNameLower}}-bg-dark: #1a1a1a;
+    --{{NodeNameLower}}-bg-medium: #2a2a2a;
+    --{{NodeNameLower}}-bg-light: #3a3a3a;
+
+    /* Border colors */
+    --{{NodeNameLower}}-border: #444444;
+    --{{NodeNameLower}}-border-light: #555555;
+    --{{NodeNameLower}}-border-focus: var(--{{NodeNameLower}}-primary);
+
+    /* Text colors */
+    --{{NodeNameLower}}-text: #ffffff;
+    --{{NodeNameLower}}-text-muted: #888888;
+    --{{NodeNameLower}}-text-dim: #666666;
+
+    /* Status colors */
+    --{{NodeNameLower}}-success: #28a745;
+    --{{NodeNameLower}}-warning: #ffc107;
+    --{{NodeNameLower}}-error: #dc3545;
+    --{{NodeNameLower}}-info: #17a2b8;
+
+    /* Spacing */
+    --{{NodeNameLower}}-spacing-xs: 4px;
+    --{{NodeNameLower}}-spacing-sm: 8px;
+    --{{NodeNameLower}}-spacing-md: 12px;
+    --{{NodeNameLower}}-spacing-lg: 16px;
+    --{{NodeNameLower}}-spacing-xl: 24px;
+
+    /* Border radius */
+    --{{NodeNameLower}}-radius-sm: 4px;
+    --{{NodeNameLower}}-radius-md: 6px;
+    --{{NodeNameLower}}-radius-lg: 8px;
+
+    /* Transitions */
+    --{{NodeNameLower}}-transition: 0.2s ease;
+}
+
+/* ============================================================================
+   Main Container
+   ============================================================================ */
+
+.{{NodeNameLower}}-container {
+    background: var(--{{NodeNameLower}}-bg-medium);
+    border: 1px solid var(--{{NodeNameLower}}-border);
+    border-radius: var(--{{NodeNameLower}}-radius-lg);
+    padding: var(--{{NodeNameLower}}-spacing-md);
+    margin: var(--{{NodeNameLower}}-spacing-sm) 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 12px;
+    color: var(--{{NodeNameLower}}-text);
+}
+
+/* ============================================================================
+   Header Section
+   ============================================================================ */
+
+.{{NodeNameLower}}-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--{{NodeNameLower}}-spacing-md);
+    padding-bottom: var(--{{NodeNameLower}}-spacing-sm);
+    border-bottom: 1px solid var(--{{NodeNameLower}}-border-light);
+}
+
+.{{NodeNameLower}}-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--{{NodeNameLower}}-text);
+}
+
+.{{NodeNameLower}}-header-controls {
+    display: flex;
+    gap: var(--{{NodeNameLower}}-spacing-sm);
+}
+
+/* ============================================================================
+   Preview Panel
+   ============================================================================ */
+
+.{{NodeNameLower}}-preview-panel {
+    background: var(--{{NodeNameLower}}-bg-dark);
+    border: 1px solid var(--{{NodeNameLower}}-border);
+    border-radius: var(--{{NodeNameLower}}-radius-md);
+    padding: var(--{{NodeNameLower}}-spacing-sm);
+    margin-bottom: var(--{{NodeNameLower}}-spacing-md);
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.{{NodeNameLower}}-preview-panel canvas {
+    max-width: 100%;
+    max-height: 100%;
+    border: 1px solid var(--{{NodeNameLower}}-border);
+    background: #000;
+}
+
+.{{NodeNameLower}}-preview-panel .preview-label {
+    color: var(--{{NodeNameLower}}-text-muted);
+    font-size: 11px;
+    text-align: center;
+    margin-top: var(--{{NodeNameLower}}-spacing-sm);
+}
+
+/* ============================================================================
+   Settings Panel
+   ============================================================================ */
+
+.{{NodeNameLower}}-settings-panel {
+    background: var(--{{NodeNameLower}}-bg-dark);
+    border: 1px solid var(--{{NodeNameLower}}-border);
+    border-radius: var(--{{NodeNameLower}}-radius-md);
+    padding: var(--{{NodeNameLower}}-spacing-md);
+    margin-bottom: var(--{{NodeNameLower}}-spacing-md);
+}
+
+.{{NodeNameLower}}-settings-panel h4 {
+    margin: 0 0 var(--{{NodeNameLower}}-spacing-md) 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--{{NodeNameLower}}-text);
+}
+
+.{{NodeNameLower}}-settings-form {
+    display: grid;
+    gap: var(--{{NodeNameLower}}-spacing-md);
+}
+
+/* ============================================================================
+   Form Elements
+   ============================================================================ */
+
+.{{NodeNameLower}}-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--{{NodeNameLower}}-spacing-xs);
+}
+
+.{{NodeNameLower}}-field label {
+    color: var(--{{NodeNameLower}}-text-muted);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.{{NodeNameLower}}-field input,
+.{{NodeNameLower}}-field select,
+.{{NodeNameLower}}-field textarea {
+    background: var(--{{NodeNameLower}}-bg-light);
+    border: 1px solid var(--{{NodeNameLower}}-border);
+    color: var(--{{NodeNameLower}}-text);
+    padding: var(--{{NodeNameLower}}-spacing-xs) var(--{{NodeNameLower}}-spacing-sm);
+    border-radius: var(--{{NodeNameLower}}-radius-sm);
+    font-size: 12px;
+    transition: border-color var(--{{NodeNameLower}}-transition);
+}
+
+.{{NodeNameLower}}-field input:focus,
+.{{NodeNameLower}}-field select:focus,
+.{{NodeNameLower}}-field textarea:focus {
+    outline: none;
+    border-color: var(--{{NodeNameLower}}-border-focus);
+}
+
+.{{NodeNameLower}}-field input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 6px;
+    background: var(--{{NodeNameLower}}-bg-dark);
+    border-radius: 3px;
+    padding: 0;
+}
+
+.{{NodeNameLower}}-field input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    background: var(--{{NodeNameLower}}-primary);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background var(--{{NodeNameLower}}-transition);
+}
+
+.{{NodeNameLower}}-field input[type="range"]::-webkit-slider-thumb:hover {
+    background: var(--{{NodeNameLower}}-primary-hover);
+}
+
+.{{NodeNameLower}}-field input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.{{NodeNameLower}}-field .value-display {
+    color: var(--{{NodeNameLower}}-text-dim);
+    font-size: 10px;
+    text-align: right;
+}
+
+/* ============================================================================
+   Buttons
+   ============================================================================ */
+
+.{{NodeNameLower}}-btn {
+    background: var(--{{NodeNameLower}}-bg-light);
+    border: 1px solid var(--{{NodeNameLower}}-border-light);
+    border-radius: var(--{{NodeNameLower}}-radius-sm);
+    color: var(--{{NodeNameLower}}-text);
+    padding: var(--{{NodeNameLower}}-spacing-xs) var(--{{NodeNameLower}}-spacing-sm);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background var(--{{NodeNameLower}}-transition);
+}
+
+.{{NodeNameLower}}-btn:hover {
+    background: var(--{{NodeNameLower}}-border-light);
+}
+
+.{{NodeNameLower}}-btn:active {
+    background: var(--{{NodeNameLower}}-border);
+}
+
+.{{NodeNameLower}}-btn-primary {
+    background: var(--{{NodeNameLower}}-primary);
+    border-color: var(--{{NodeNameLower}}-primary);
+}
+
+.{{NodeNameLower}}-btn-primary:hover {
+    background: var(--{{NodeNameLower}}-primary-hover);
+    border-color: var(--{{NodeNameLower}}-primary-hover);
+}
+
+.{{NodeNameLower}}-btn-icon {
+    padding: var(--{{NodeNameLower}}-spacing-xs);
+    min-width: 28px;
+    text-align: center;
+}
+
+/* ============================================================================
+   Status Bar
+   ============================================================================ */
+
+.{{NodeNameLower}}-status-bar {
+    background: var(--{{NodeNameLower}}-bg-dark);
+    border: 1px solid var(--{{NodeNameLower}}-border);
+    border-radius: var(--{{NodeNameLower}}-radius-sm);
+    padding: var(--{{NodeNameLower}}-spacing-xs) var(--{{NodeNameLower}}-spacing-sm);
+    font-size: 10px;
+    color: var(--{{NodeNameLower}}-text-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.{{NodeNameLower}}-status-bar .status {
+    display: flex;
+    align-items: center;
+    gap: var(--{{NodeNameLower}}-spacing-xs);
+}
+
+.{{NodeNameLower}}-status-bar .status-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--{{NodeNameLower}}-success);
+}
+
+.{{NodeNameLower}}-status-bar .status-indicator.processing {
+    background: var(--{{NodeNameLower}}-warning);
+    animation: pulse 1s infinite;
+}
+
+.{{NodeNameLower}}-status-bar .status-indicator.error {
+    background: var(--{{NodeNameLower}}-error);
+}
+
+/* ============================================================================
+   Animations
+   ============================================================================ */
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ============================================================================
+   Utility Classes
+   ============================================================================ */
+
+.{{NodeNameLower}}-hidden {
+    display: none !important;
+}
+
+.{{NodeNameLower}}-fade-in {
+    animation: fadeIn var(--{{NodeNameLower}}-transition);
+}
+
+.{{NodeNameLower}}-slide-down {
+    animation: slideDown var(--{{NodeNameLower}}-transition);
+}
+
+.{{NodeNameLower}}-flex {
+    display: flex;
+}
+
+.{{NodeNameLower}}-flex-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.{{NodeNameLower}}-gap-sm {
+    gap: var(--{{NodeNameLower}}-spacing-sm);
+}
+
+.{{NodeNameLower}}-gap-md {
+    gap: var(--{{NodeNameLower}}-spacing-md);
+}
+
+/* ============================================================================
+   Responsive Adjustments
+   ============================================================================ */
+
+@media (max-width: 400px) {
+    .{{NodeNameLower}}-container {
+        padding: var(--{{NodeNameLower}}-spacing-sm);
+    }
+
+    .{{NodeNameLower}}-header {
+        flex-direction: column;
+        gap: var(--{{NodeNameLower}}-spacing-sm);
+    }
+
+    .{{NodeNameLower}}-preview-panel {
+        min-height: 150px;
+    }
+}
+
+/* ============================================================================
+   Dark Mode Overrides (for light theme ComfyUI installations)
+   ============================================================================ */
+
+.comfy-light-mode .{{NodeNameLower}}-container {
+    --{{NodeNameLower}}-bg-dark: #f5f5f5;
+    --{{NodeNameLower}}-bg-medium: #ffffff;
+    --{{NodeNameLower}}-bg-light: #e8e8e8;
+    --{{NodeNameLower}}-border: #cccccc;
+    --{{NodeNameLower}}-border-light: #dddddd;
+    --{{NodeNameLower}}-text: #222222;
+    --{{NodeNameLower}}-text-muted: #666666;
+    --{{NodeNameLower}}-text-dim: #888888;
+}

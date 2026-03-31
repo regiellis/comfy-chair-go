@@ -295,13 +295,133 @@ class {{NodeName}}:
             "load_timestamp": torch.tensor([0.0]),  # Placeholder
             "success": True,
         }
-        
+
         # Add device-specific information
         if device == "cuda":
             metadata["cuda_memory_allocated"] = torch.cuda.memory_allocated() / (1024**3)  # GB
             metadata["cuda_memory_reserved"] = torch.cuda.memory_reserved() / (1024**3)   # GB
-        
+
         return metadata
+
+    @classmethod
+    def IS_CHANGED(cls, model_path, model_type, device, precision,
+                   cache_enabled=True, optimize_memory=True, model_config="{}",
+                   force_reload=False):
+        """
+        Determines if the node needs re-execution based on input changes.
+
+        For model loading nodes, consider:
+        - Model file modification time (detect file updates)
+        - Model path and configuration changes
+        - Force reload flag to bypass caching
+
+        Return options:
+        - float('nan'): Always reload the model
+        - Hash including file mtime: Reload when file changes
+        - Hash of config only: Reload only when config changes
+
+        Example customizations:
+            # Include file hash for strict model verification:
+            import hashlib
+            with open(model_path, 'rb') as f:
+                file_hash = hashlib.md5(f.read()).hexdigest()
+            return hash((file_hash, device, precision))
+        """
+        # Force reload bypasses all caching
+        if force_reload:
+            return float('nan')
+
+        # Include file modification time to detect model updates
+        try:
+            if model_path and os.path.exists(model_path):
+                mtime = os.path.getmtime(model_path)
+            else:
+                mtime = None
+        except OSError:
+            mtime = None
+
+        # Hash based on model path, mtime, and configuration
+        return hash((model_path, mtime, model_type, device, precision,
+                     cache_enabled, optimize_memory, model_config))
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, model_path, model_type, device, precision,
+                        cache_enabled=True, optimize_memory=True, model_config="{}",
+                        force_reload=False):
+        """
+        Validates inputs before the node executes.
+
+        For model loading nodes, validate:
+        - Model file exists and is readable
+        - Model file has valid extension for the type
+        - Device is available (CUDA, MPS)
+        - JSON configuration format
+
+        Return values:
+        - True: All inputs are valid
+        - String: Error message describing the validation failure
+
+        Example customizations:
+            # Validate minimum file size:
+            if os.path.getsize(model_path) < 1000:
+                return "Model file appears to be empty or corrupted"
+
+            # Check for specific model architectures:
+            if "sd_xl" in model_path.lower() and device == "cpu":
+                return "SDXL models require GPU acceleration"
+        """
+        # Validate model path exists
+        if not model_path:
+            return "model_path is required"
+
+        if not os.path.exists(model_path):
+            return f"Model file not found: {model_path}"
+
+        # Check if path is a file or directory (diffusers can be directories)
+        path = Path(model_path)
+        if path.is_dir():
+            # For directories, check if it's a valid diffusers model
+            if not (path / "model_index.json").exists():
+                # Could be another valid format, just warn
+                pass
+        else:
+            # For files, check if readable
+            if not os.access(model_path, os.R_OK):
+                return f"Model file is not readable: {model_path}"
+
+            # Validate file extension matches model_type
+            valid_extensions = {
+                "safetensors": [".safetensors"],
+                "checkpoint": [".ckpt", ".pth", ".pt", ".bin"],
+                "onnx": [".onnx"],
+                "auto": [".safetensors", ".ckpt", ".pth", ".pt", ".bin", ".onnx"],
+            }
+
+            if model_type in valid_extensions:
+                allowed = valid_extensions[model_type]
+                if path.suffix.lower() not in allowed:
+                    return f"File extension '{path.suffix}' not valid for model_type '{model_type}'. Expected: {allowed}"
+
+        # Validate device availability
+        if device == "cuda" and not torch.cuda.is_available():
+            return "CUDA device requested but not available"
+
+        if device == "mps":
+            if not hasattr(torch.backends, 'mps') or not torch.backends.mps.is_available():
+                return "MPS device requested but not available"
+
+        # Validate model_config JSON format
+        if model_config:
+            try:
+                import json
+                parsed_config = json.loads(model_config)
+                if not isinstance(parsed_config, dict):
+                    return "model_config must be a JSON object (dict)"
+            except json.JSONDecodeError as e:
+                return f"Invalid model_config JSON format: {str(e)}"
+
+        # All validations passed
+        return True
 
 
 # Node Registration
