@@ -10,7 +10,7 @@ import numpy as np
 from typing import Dict, Any, Tuple, Optional, List
 import json
 import os
-from ..utils import NodeSettings, UIComponents
+from .utils import NodeSettings, UIComponents
 
 
 class {{NodeName}}:
@@ -279,8 +279,104 @@ class {{NodeName}}:
             "success": True,
             "custom_params": context.get("custom_params", {}),
         }
-        
+
         return metadata
+
+    @classmethod
+    def IS_CHANGED(cls, input_image, processing_mode, strength, enable_preview,
+                   mask=None, settings_json="{}", custom_params=None,
+                   node_id="", extra_pnginfo=None):
+        """
+        Determines if the node needs re-execution based on input changes.
+
+        For image processing nodes, consider:
+        - Image tensor shape and content hash (for large images, use shape + sample)
+        - Processing parameters that affect output
+        - Mask changes if applicable
+
+        Return options:
+        - float('nan'): Always re-run (use for non-deterministic processing)
+        - Hash of inputs: Re-run only when inputs change
+
+        Example customizations:
+            # Always re-run for experimental modes:
+            if processing_mode == "experimental":
+                return float('nan')
+
+            # Include image content in hash for strict caching:
+            image_hash = hash(input_image.cpu().numpy().tobytes())
+        """
+        # Hash based on image shape, parameters, and settings
+        # Note: Full image hashing can be expensive; shape + params is a good balance
+        image_shape = tuple(input_image.shape) if hasattr(input_image, 'shape') else None
+        mask_shape = tuple(mask.shape) if mask is not None and hasattr(mask, 'shape') else None
+
+        return hash((image_shape, processing_mode, strength, enable_preview,
+                     mask_shape, settings_json))
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, input_image, processing_mode, strength, enable_preview,
+                        mask=None, settings_json="{}", custom_params=None,
+                        node_id="", extra_pnginfo=None):
+        """
+        Validates inputs before the node executes.
+
+        For image processing nodes, validate:
+        - Image tensor dimensions and shape
+        - Mask compatibility with input image
+        - JSON settings format
+        - Parameter value ranges
+
+        Return values:
+        - True: All inputs are valid
+        - String: Error message describing the validation failure
+
+        Example customizations:
+            # Enforce minimum image size:
+            if height < 64 or width < 64:
+                return "Image must be at least 64x64 pixels"
+
+            # Validate custom processing modes:
+            if processing_mode == "enhanced" and strength > 1.5:
+                return "Enhanced mode requires strength <= 1.5"
+        """
+        # Validate image tensor dimensions (expected: batch, height, width, channels)
+        if hasattr(input_image, 'dim'):
+            if input_image.dim() != 4:
+                return f"input_image must be 4D tensor (batch, H, W, C), got {input_image.dim()}D"
+
+            batch, height, width, channels = input_image.shape
+
+            # Validate minimum dimensions
+            if height < 8 or width < 8:
+                return f"Image dimensions too small: {height}x{width}, minimum is 8x8"
+
+            # Validate channel count
+            if channels not in [1, 3, 4]:
+                return f"Invalid channel count: {channels}, expected 1, 3, or 4"
+
+        # Validate mask compatibility if provided
+        if mask is not None and hasattr(mask, 'shape') and hasattr(input_image, 'shape'):
+            mask_h, mask_w = mask.shape[-2], mask.shape[-1]
+            img_h, img_w = input_image.shape[1], input_image.shape[2]
+
+            if mask_h != img_h or mask_w != img_w:
+                return f"Mask size ({mask_h}x{mask_w}) must match image size ({img_h}x{img_w})"
+
+        # Validate settings JSON format
+        if settings_json:
+            try:
+                import json
+                json.loads(settings_json)
+            except json.JSONDecodeError as e:
+                return f"Invalid settings_json format: {str(e)}"
+
+        # Validate strength is within usable range
+        if strength < 0.0 or strength > 2.0:
+            return f"strength must be between 0.0 and 2.0, got {strength}"
+
+        # All validations passed
+        return True
 
 
 # Node Registration

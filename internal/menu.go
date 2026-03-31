@@ -42,6 +42,8 @@ type MenuChoices struct {
 	Stop               MenuAction
 	Restart            MenuAction
 	Update             MenuAction
+	UpdateNightly      MenuAction
+	Downgrade          MenuAction
 	Install            func()
 	CreateNode         func()
 	ListNodes          func()
@@ -133,7 +135,9 @@ func showMainActionsMenu() string {
 					huh.NewOption("Start ComfyUI (Background)", "start_bg"),
 					huh.NewOption("Stop ComfyUI", "stop"),
 					huh.NewOption("Restart ComfyUI (Background)", "restart"),
-					huh.NewOption("Update ComfyUI", "update"),
+					huh.NewOption("Update ComfyUI (Stable)", "update"),
+					huh.NewOption("Update ComfyUI (Nightly)", "nightly"),
+					huh.NewOption("Downgrade ComfyUI (Select Tag)", "downgrade"),
 					huh.NewOption("Install/Reconfigure ComfyUI", "install"),
 					huh.NewOption("Status (ComfyUI)", "status"),
 					huh.NewOption("More Tools", "back"),
@@ -299,6 +303,12 @@ func executeMenuAction(choice string, choices MenuChoices, appPaths *Paths) {
 	case "update":
 		RunWithEnvConfirmation("update", choices.Update)
 		os.Exit(0)
+	case "nightly":
+		RunWithEnvConfirmation("nightly", choices.UpdateNightly)
+		os.Exit(0)
+	case "downgrade":
+		RunWithEnvConfirmation("downgrade", choices.Downgrade)
+		os.Exit(0)
 	case "install":
 		choices.Install()
 		os.Exit(0)
@@ -390,16 +400,22 @@ func GetReloadSettings(inst *ComfyInstall) (watchDir string, debounce int, exts 
 				includedDirs = selected
 			}
 			// Save to comfy-installs.json
-			cfg, _ := LoadGlobalConfig()
-			for i := range cfg.Installs {
-				if cfg.Installs[i].Type == inst.Type {
-					cfg.Installs[i].ReloadIncludeDirs = includedDirs
+			cfg, err := LoadGlobalConfig()
+			if err != nil {
+				Log.Error("Failed to load config: %v", err)
+			} else {
+				for i := range cfg.Installs {
+					if cfg.Installs[i].Type == inst.Type {
+						cfg.Installs[i].ReloadIncludeDirs = includedDirs
+					}
+				}
+				if err := SaveGlobalConfig(cfg); err != nil {
+					Log.Error("Failed to save reload directory config: %v", err)
 				}
 			}
-			_ = SaveGlobalConfig(cfg)
 		}
 	}
-	
+
 	return watchDir, debounce, exts, includedDirs
 }
 

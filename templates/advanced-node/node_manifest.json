@@ -1,0 +1,28 @@
+{
+    "name": "{{NodeName}}",
+    "version": "{{Version}}",
+    "author": "{{Author}}",
+    "description": "{{NodeDesc}}",
+    "license": "MIT",
+    "repository": "https://github.com/{{PubID}}/{{NodeNameLower}}",
+    "node_class_mappings": [
+        "{{NodeName}}"
+    ],
+    "dependencies": {
+        "python": ">=3.10",
+        "requirements": "requirements.txt",
+        "packages": [
+            "torch>=2.0.0",
+            "torchvision>=0.15.0",
+            "numpy>=1.21.0",
+            "pillow>=9.0.0"
+        ]
+    },
+    "comfy_version": ">=0.2.0",
+    "tags": [
+        "custom-node",
+        "advanced",
+        "ui-components",
+        "settings"
+    ]
+}

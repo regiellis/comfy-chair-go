@@ -9,6 +9,40 @@ import (
 	"strings"
 )
 
+const (
+	torchInstallCmdNvidiaKey     = "TORCH_INSTALL_CMD_NVIDIA"
+	defaultTorchInstallCmdNvidia = "install --index-url https://download.pytorch.org/whl/nightly/cu130 torch torchvision torchaudio"
+)
+
+func defaultTorchInstallCommand(gpuType string) []string {
+	switch strings.ToLower(strings.TrimSpace(gpuType)) {
+	case "nvidia":
+		return strings.Fields(defaultTorchInstallCmdNvidia)
+	case "amd":
+		return []string{"install", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/rocm6.3"}
+	case "intel":
+		return []string{"install", "--pre", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/nightly/xpu"}
+	case "directml":
+		return []string{"install", "torch-directml"}
+	case "cpu":
+		return []string{"install", "torch", "torchvision", "torchaudio"}
+	default:
+		return nil
+	}
+}
+
+func resolveTorchInstallCommand(gpuType string, envVars map[string]string) ([]string, string) {
+	switch strings.ToLower(strings.TrimSpace(gpuType)) {
+	case "nvidia":
+		if custom := strings.TrimSpace(envVars[torchInstallCmdNvidiaKey]); custom != "" {
+			return strings.Fields(custom), torchInstallCmdNvidiaKey
+		}
+		return defaultTorchInstallCommand(gpuType), ""
+	default:
+		return defaultTorchInstallCommand(gpuType), ""
+	}
+}
+
 var defaultCustomNodes = []struct {
 	Name string
 	Repo string
@@ -48,19 +82,19 @@ func InstallComfyUI(
 		nodePath := filepath.Join(ExpandUserPath(appPaths.ComfyUIDir), "custom_nodes", node.Name)
 		if _, err := os.Stat(nodePath); os.IsNotExist(err) {
 			fmt.Println(InfoStyle.Render("Cloning default node: " + node.Name))
-			
+
 			err := DryRunExecute("Git clone: %s -> %s", func() error {
 				cmd := exec.Command("git", "clone", node.Repo, nodePath)
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 				return cmd.Run()
 			}, node.Repo, nodePath)
-			
+
 			if err != nil {
 				fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to clone node %s: %v", node.Name, err)))
 				continue
 			}
-			
+
 			if !IsDryRun() {
 				fmt.Println(SuccessStyle.Render(fmt.Sprintf("Successfully cloned node: %s", node.Name)))
 			}
@@ -74,7 +108,7 @@ func InstallComfyUI(
 			if _, err := os.Stat(uvPath); err == nil {
 				// Ensure pip is installed in the venv
 				fmt.Println(InfoStyle.Render("Updating pip in virtual environment..."))
-				
+
 				err := DryRunExecute("Update pip using uv", func() error {
 					cmdPip := exec.Command(uvPath, "pip", "install", "-U", "pip")
 					cmdPip.Dir = ExpandUserPath(appPaths.ComfyUIDir)
@@ -83,7 +117,7 @@ func InstallComfyUI(
 					cmdPip.Stderr = os.Stderr
 					return cmdPip.Run()
 				})
-				
+
 				if err != nil {
 					fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to update pip: %v", err)))
 				} else if !IsDryRun() {
@@ -143,42 +177,58 @@ func InstallComfyUI(
 	gpuType := envVars["GPU_TYPE"]
 	pythonVersion := envVars["PYTHON_VERSION"]
 	if pythonVersion == "" {
-		pythonVersion = "3.12"
+		pythonVersion = DefaultPythonVersion
 	}
 	venvPython, err = FindVenvPython(ExpandUserPath(appPaths.ComfyUIDir))
 	if err == nil {
 		venvBin := filepath.Join(filepath.Dir(filepath.Dir(venvPython)), "bin")
-		pipPath := filepath.Join(venvBin, "pip")
+		uvPath := filepath.Join(venvBin, "uv")
+		if stat, statErr := os.Stat(uvPath); statErr != nil || stat.IsDir() {
+			if uvSys, uvErr := exec.LookPath("uv"); uvErr == nil {
+				uvPath = uvSys
+			} else {
+				uvPath = ""
+			}
+		}
 		var torchCmd []string
+		torchCmdSource := ""
 		switch strings.ToLower(gpuType) {
 		case "nvidia":
-			torchCmd = []string{"install", "torch", "torchvision", "torchaudio", "--extra-index-url", "https://download.pytorch.org/whl/cu128"}
+			torchCmd, torchCmdSource = resolveTorchInstallCommand(gpuType, envVars)
 		case "amd":
-			torchCmd = []string{"install", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/rocm6.3"}
+			torchCmd = defaultTorchInstallCommand(gpuType)
 		case "intel":
-			torchCmd = []string{"install", "--pre", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/nightly/xpu"}
+			torchCmd = defaultTorchInstallCommand(gpuType)
 		case "apple":
 			fmt.Println(InfoStyle.Render("Apple Silicon: Please follow the official PyTorch nightly install instructions for Metal backend. See: https://developer.apple.com/metal/pytorch/"))
 		case "directml":
-			torchCmd = []string{"install", "torch-directml"}
+			torchCmd = defaultTorchInstallCommand(gpuType)
 		case "ascend":
 			fmt.Println(InfoStyle.Render("Ascend NPU: Please follow the official torch-npu install instructions. See: https://www.hiascend.com/software/modelzoo/tool/torch-npu"))
 		case "cambricon":
 			fmt.Println(InfoStyle.Render("Cambricon MLU: Please follow the official torch_mlu install instructions. See: https://www.cambricon.com/"))
 		case "cpu":
-			torchCmd = []string{"install", "torch", "torchvision", "torchaudio"}
+			torchCmd = defaultTorchInstallCommand(gpuType)
 		}
 		if len(torchCmd) > 0 {
-			fmt.Println(InfoStyle.Render("Installing PyTorch for your GPU in the venv..."))
-			cmd := exec.Command(pipPath, torchCmd...)
-			cmd.Dir = ExpandUserPath(appPaths.ComfyUIDir)
-			cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				fmt.Println(WarningStyle.Render("PyTorch install failed. You may need to install manually. See README for details."))
+			if torchCmdSource != "" {
+				fmt.Println(InfoStyle.Render(fmt.Sprintf("Installing PyTorch for your GPU in the venv using %s from .env...", torchCmdSource)))
 			} else {
-				fmt.Println(SuccessStyle.Render("PyTorch installed successfully for your GPU."))
+				fmt.Println(InfoStyle.Render("Installing PyTorch for your GPU in the venv..."))
+			}
+			if uvPath == "" {
+				fmt.Println(WarningStyle.Render("uv not found; skipping GPU package install to avoid damaging the environment. Please install uv and retry."))
+			} else {
+				cmd := exec.Command(uvPath, append([]string{"pip"}, torchCmd...)...)
+				cmd.Dir = ExpandUserPath(appPaths.ComfyUIDir)
+				cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					fmt.Println(WarningStyle.Render("PyTorch install failed. You may need to install manually. See README for details."))
+				} else {
+					fmt.Println(SuccessStyle.Render("PyTorch installed successfully for your GPU."))
+				}
 			}
 		}
 	}
@@ -255,24 +305,24 @@ func EnsurePipCompatibility(venvPath, uvPath string) error {
 	if uvPath == "" {
 		return nil // Not a uv environment
 	}
-	
+
 	venvBin := filepath.Join(venvPath, "bin")
 	if strings.Contains(venvPath, "\\") || strings.Contains(venvPath, ":\\") {
 		venvBin = filepath.Join(venvPath, "Scripts") // Windows
 	}
-	
+
 	// Run uv pip install -U pip to ensure pip compatibility
 	fmt.Println(InfoStyle.Render("Ensuring pip compatibility in uv environment..."))
 	cmd := exec.Command(uvPath, "pip", "install", "-U", "pip")
 	cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		fmt.Println(WarningStyle.Render(fmt.Sprintf("Warning: Could not ensure pip compatibility: %v", err)))
 		return err
 	}
-	
+
 	fmt.Println(SuccessStyle.Render("pip compatibility ensured"))
 	return nil
 }
@@ -282,7 +332,7 @@ func DetectAndFixPipUvConflict(err error, venvPath, uvPath string) error {
 	if err == nil || uvPath == "" {
 		return err
 	}
-	
+
 	errorMsg := err.Error()
 	// Check for common pip/uv conflict indicators
 	conflictIndicators := []string{
@@ -294,7 +344,7 @@ func DetectAndFixPipUvConflict(err error, venvPath, uvPath string) error {
 		"distutils.util",
 		"setuptools",
 	}
-	
+
 	isConflict := false
 	for _, indicator := range conflictIndicators {
 		if strings.Contains(strings.ToLower(errorMsg), strings.ToLower(indicator)) {
@@ -302,19 +352,19 @@ func DetectAndFixPipUvConflict(err error, venvPath, uvPath string) error {
 			break
 		}
 	}
-	
+
 	if !isConflict {
 		return err
 	}
-	
+
 	fmt.Println(WarningStyle.Render("Detected pip/uv compatibility issue, attempting to fix..."))
-	
+
 	// Attempt to fix by ensuring pip compatibility
 	if fixErr := EnsurePipCompatibility(venvPath, uvPath); fixErr != nil {
 		fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to fix pip/uv compatibility: %v", fixErr)))
 		return err // Return original error
 	}
-	
+
 	return nil // Fixed successfully
 }
 
@@ -344,12 +394,12 @@ func installNodeRequirements(venvPath, nodeDir, reqFile string) error {
 		if err := EnsurePipCompatibility(venvPath, uvPath); err != nil {
 			fmt.Println(WarningStyle.Render("Warning: Could not ensure pip compatibility, proceeding anyway"))
 		}
-		
+
 		cmdUv := exec.Command(uvPath, "pip", "install", "-r", reqFile)
 		cmdUv.Dir = nodeDir
 		cmdUv.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
 		installErr = cmdUv.Run()
-		
+
 		if installErr != nil {
 			// Attempt to detect and fix pip/uv conflicts
 			if fixedErr := DetectAndFixPipUvConflict(installErr, venvPath, uvPath); fixedErr == nil {

@@ -35,12 +35,12 @@ type Command struct {
 type CLIRouter struct {
 	commands   map[string]*Command
 	paths      *Paths
-	reloadFunc func(string, int, []string, []string)
+	reloadFunc func(string, int, []string, []string) error
 	dryRun     bool
 }
 
 // NewCLIRouter creates a new CLI router
-func NewCLIRouter(paths *Paths, reloadFunc func(string, int, []string, []string)) *CLIRouter {
+func NewCLIRouter(paths *Paths, reloadFunc func(string, int, []string, []string) error) *CLIRouter {
 	return &CLIRouter{
 		commands:   make(map[string]*Command),
 		paths:      paths,
@@ -165,7 +165,7 @@ func (r *CLIRouter) ShowHelp() {
 			
 			// Categorize commands
 			switch {
-			case contains([]string{"start", "background", "stop", "restart", "update", "status"}, cmd.Name):
+			case contains([]string{"start", "background", "stop", "restart", "update", "nightly", "downgrade", "status"}, cmd.Name):
 				categories["ComfyUI Management"] = append(categories["ComfyUI Management"], cmd)
 			case contains([]string{"reload", "install"}, cmd.Name):
 				categories["Development Tools"] = append(categories["Development Tools"], cmd)
@@ -285,7 +285,10 @@ func (r *CLIRouter) HandleReloadCommand() {
 	}
 	
 	// Call the actual reload function
-	r.reloadFunc(watchDir, debounce, exts, includedDirs)
+	if err := r.reloadFunc(watchDir, debounce, exts, includedDirs); err != nil {
+		fmt.Println(ErrorStyle.Render(fmt.Sprintf("Reload failed: %v", err)))
+		os.Exit(1)
+	}
 }
 
 // contains checks if a slice contains a string
@@ -304,6 +307,8 @@ func (r *CLIRouter) SetupCLICommands(
 	stopComfyUIFunc func(*ComfyInstall),
 	restartComfyUIFunc func(*ComfyInstall),
 	updateComfyUIFunc func(*ComfyInstall),
+	updateNightlyFunc func(*ComfyInstall),
+	downgradeComfyUIFunc func(*ComfyInstall),
 	statusComfyUIFunc func(*ComfyInstall),
 	installFunc func(),
 	createNodeFunc func(),
@@ -354,8 +359,24 @@ func (r *CLIRouter) SetupCLICommands(
 	r.RegisterCommand(&Command{
 		Name:        "update",
 		Aliases:     []string{},
-		Description: "Update ComfyUI",
+		Description: "Update ComfyUI to latest stable tag",
 		EnvHandler:  updateComfyUIFunc,
+		RequiresEnv: true,
+	})
+
+	r.RegisterCommand(&Command{
+		Name:        "nightly",
+		Aliases:     []string{"update-nightly", "nightly-update"},
+		Description: "Update ComfyUI to latest nightly (default branch)",
+		EnvHandler:  updateNightlyFunc,
+		RequiresEnv: true,
+	})
+
+	r.RegisterCommand(&Command{
+		Name:        "downgrade",
+		Aliases:     []string{"update-downgrade"},
+		Description: "Downgrade ComfyUI to a selected stable tag",
+		EnvHandler:  downgradeComfyUIFunc,
 		RequiresEnv: true,
 	})
 	

@@ -67,19 +67,67 @@ class {{NodeName}}:
         return (output_text, output_number, output_bool, output_choice)
 
     @classmethod
-    def IS_CHANGED(cls, **kwargs):
+    def IS_CHANGED(cls, input_text, input_number, input_bool, input_choice, input_optional=None):
         """
-        Optional: Implement this to control when the node is considered changed (for caching).
+        Determines if the node needs re-execution based on input changes.
+
+        ComfyUI uses this method for caching: if the return value matches
+        a previous execution, cached results are used instead of re-running.
+
+        Return options:
+        - float('nan'): Always re-run the node (no caching)
+        - Hash/value of inputs: Re-run only when inputs change
+        - Constant value: Always use cached result (if available)
+
+        Customize this method based on your node's behavior:
+        - For deterministic nodes: hash the inputs
+        - For nodes with randomness or external state: return float('nan')
+        - For nodes reading files: include file modification time in hash
+
+        Example customizations:
+            # Always re-run (for random/non-deterministic nodes):
+            return float('nan')
+
+            # Hash specific inputs for selective caching:
+            return hash((input_text, input_number))
         """
-        return True
+        # Default: hash all inputs for deterministic caching
+        return hash((input_text, input_number, input_bool, input_choice, input_optional))
 
     @classmethod
-    def VALIDATE_INPUTS(cls, **inputs):
+    def VALIDATE_INPUTS(cls, input_text, input_number, input_bool, input_choice, input_optional=None):
         """
-        Optional: Implement this to validate inputs before running the node.
-        Raise an exception to signal invalid input.
+        Validates inputs before the node executes.
+
+        This method is called before execution to catch invalid inputs early,
+        providing better error messages and preventing wasted computation.
+
+        Return values:
+        - True: All inputs are valid, proceed with execution
+        - String: Error message describing the validation failure
+
+        Note: Type checking is handled by ComfyUI automatically based on INPUT_TYPES.
+        Use this method for semantic validation (value ranges, format checks, etc.).
+
+        Example customizations:
+            # Validate text format:
+            if input_text and not input_text.strip():
+                return "input_text cannot be empty or whitespace only"
+
+            # Validate number ranges beyond INPUT_TYPES constraints:
+            if input_number % 2 != 0:
+                return "input_number must be an even number"
         """
-        pass
+        # Validate input_text is not empty if provided
+        if input_text is not None and isinstance(input_text, str) and len(input_text) == 0:
+            return "input_text cannot be empty"
+
+        # Validate input_number range (additional semantic check)
+        if input_number is not None and input_number < 0:
+            return "input_number must be non-negative"
+
+        # All validations passed
+        return True
 
     @classmethod
     def BATCHED(cls):

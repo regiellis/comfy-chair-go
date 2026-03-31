@@ -159,6 +159,116 @@ class {{NodeName}}:
             error_msg = f"API request failed: {str(e)}"
             return (error_msg, {"error": str(e)}, 500, 0.0)
 
+    @classmethod
+    def IS_CHANGED(cls, api_url, method, timeout, headers="{}", body="",
+                   auth_token="", cache_enabled=True):
+        """
+        Determines if the node needs re-execution based on input changes.
+
+        For API nodes, consider:
+        - External APIs may return different data even with same inputs
+        - Caching behavior should match API semantics (GET vs POST)
+        - Time-sensitive data may need forced refresh
+
+        Return options:
+        - float('nan'): Always re-run (recommended for most API calls)
+        - Hash of inputs: Re-run only when inputs change (for stable endpoints)
+
+        Example customizations:
+            # Always fetch fresh data for POST requests:
+            if method in ["POST", "PUT", "PATCH", "DELETE"]:
+                return float('nan')
+
+            # Cache GET requests based on URL and params:
+            if method == "GET" and cache_enabled:
+                return hash((api_url, headers))
+        """
+        # For API nodes, always re-run by default since external data may change
+        # This ensures fresh data from APIs
+        # If you want caching, modify based on your API's behavior
+        if not cache_enabled:
+            return float('nan')
+
+        # When caching is enabled, hash the request parameters
+        # Note: This only prevents redundant calls within the same workflow run
+        return hash((api_url, method, headers, body, auth_token))
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, api_url, method, timeout, headers="{}", body="",
+                        auth_token="", cache_enabled=True):
+        """
+        Validates inputs before the node executes.
+
+        For API nodes, validate:
+        - URL format and protocol
+        - JSON format for headers and body
+        - API key/token format (without exposing secrets)
+        - Timeout ranges
+
+        Return values:
+        - True: All inputs are valid
+        - String: Error message describing the validation failure
+
+        Example customizations:
+            # Validate specific API endpoint patterns:
+            if "api.example.com" in api_url and not auth_token:
+                return "API key required for api.example.com"
+
+            # Validate request body for specific methods:
+            if method == "POST" and not body:
+                return "POST requests require a body"
+        """
+        import re
+
+        # Validate URL format
+        if not api_url:
+            return "api_url is required"
+
+        # Basic URL format validation
+        url_pattern = r'^https?://[^\s/$.?#].[^\s]*$'
+        if not re.match(url_pattern, api_url, re.IGNORECASE):
+            return f"Invalid URL format: {api_url}. Must start with http:// or https://"
+
+        # Warn about non-HTTPS URLs (but allow them)
+        # This is informational - actual security checks should be stricter
+        if api_url.startswith("http://") and "localhost" not in api_url and "127.0.0.1" not in api_url:
+            # Note: This is a warning, not an error - you might want to make this stricter
+            pass
+
+        # Validate headers JSON format
+        if headers:
+            try:
+                import json
+                parsed_headers = json.loads(headers)
+                if not isinstance(parsed_headers, dict):
+                    return "headers must be a JSON object (dict)"
+            except json.JSONDecodeError as e:
+                return f"Invalid headers JSON format: {str(e)}"
+
+        # Validate body JSON format for methods that typically use JSON
+        if body and method in ["POST", "PUT", "PATCH"]:
+            # Only validate if it looks like JSON (starts with { or [)
+            stripped_body = body.strip()
+            if stripped_body.startswith('{') or stripped_body.startswith('['):
+                try:
+                    import json
+                    json.loads(body)
+                except json.JSONDecodeError as e:
+                    return f"Invalid body JSON format: {str(e)}"
+
+        # Validate timeout range
+        if timeout < 1:
+            return "timeout must be at least 1 second"
+        if timeout > 300:
+            return "timeout cannot exceed 300 seconds (5 minutes)"
+
+        # Validate auth_token format (basic check - not empty spaces)
+        if auth_token and auth_token.strip() != auth_token:
+            return "auth_token contains leading/trailing whitespace"
+
+        # All validations passed
+        return True
+
 
 # Node Registration
 NODE_CLASS_MAPPINGS = {

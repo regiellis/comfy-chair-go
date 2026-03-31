@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -156,11 +155,10 @@ func gitignorePatternToRegex(pattern string) string {
 }
 
 // NOTE: includedDirs is now sourced from comfy-installs.json (per environment) via main.go, not from .env.
-func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, includedDirs []string) {
+func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, includedDirs []string) error {
 	logFile := appPaths.LogFile
 	if logFile == "" {
-		fmt.Println(internal.ErrorStyle.Render("Log file path is not set."))
-		return
+		return fmt.Errorf("log file path is not set")
 	}
 
 	// Start tailing the log file in a goroutine
@@ -207,7 +205,8 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Fatal(internal.ErrorStyle.Render(fmt.Sprintf("Failed to create watcher: %v", err)))
+		close(tailDone)
+		return fmt.Errorf("failed to create watcher: %w", err)
 	}
 	defer watcher.Close()
 
@@ -305,10 +304,10 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 		select {
 		case <-done:
 			fmt.Println(internal.InfoStyle.Render("Shutdown signal received, stopping file watcher..."))
-			return
+			return nil
 		case event, ok := <-watcher.Events:
 			if !ok {
-				return
+				return nil
 			}
 			
 			// Check if this file should be ignored
@@ -352,9 +351,9 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
-				return
+				return nil
 			}
-			log.Println(internal.ErrorStyle.Render(fmt.Sprintf("Watcher error: %v", err)))
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Watcher error: %v", err)))
 		}
 	}
 }
