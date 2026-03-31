@@ -18,17 +18,18 @@ type EnvironmentCommandHandler func(inst *ComfyInstall)
 
 // GlobalFlags represents global CLI flags that apply to all commands
 type GlobalFlags struct {
-	DryRun bool
+	DryRun  bool
+	Version bool
 }
 
 // Command represents a CLI command with its metadata
 type Command struct {
-	Name         string
-	Aliases      []string
-	Description  string
-	Handler      CommandHandler
-	EnvHandler   EnvironmentCommandHandler
-	RequiresEnv  bool
+	Name        string
+	Aliases     []string
+	Description string
+	Handler     CommandHandler
+	EnvHandler  EnvironmentCommandHandler
+	RequiresEnv bool
 }
 
 // CLIRouter handles command registration and routing
@@ -52,7 +53,7 @@ func NewCLIRouter(paths *Paths, reloadFunc func(string, int, []string, []string)
 func (r *CLIRouter) RegisterCommand(cmd *Command) {
 	// Register the main command name
 	r.commands[cmd.Name] = cmd
-	
+
 	// Register all aliases
 	for _, alias := range cmd.Aliases {
 		r.commands[alias] = cmd
@@ -64,18 +65,22 @@ func (r *CLIRouter) Route(args []string) bool {
 	if len(args) <= 1 {
 		return false // No command provided, fall back to interactive menu
 	}
-	
+
 	// Parse global flags and filter them out
 	filteredArgs, globalFlags := r.parseGlobalFlags(args)
 	r.dryRun = globalFlags.DryRun
-	
+
 	// Set global dry-run state
 	SetDryRunMode(r.dryRun)
-	
+
 	if len(filteredArgs) <= 1 {
+		if globalFlags.Version {
+			r.ShowVersion()
+			return true
+		}
 		return false // No command after flags, fall back to interactive menu
 	}
-	
+
 	commandName := filteredArgs[1]
 	cmd, exists := r.commands[commandName]
 	if !exists {
@@ -83,13 +88,13 @@ func (r *CLIRouter) Route(args []string) bool {
 		r.ShowHelp()
 		os.Exit(1)
 	}
-	
+
 	// Show dry-run message if enabled
 	if r.dryRun {
 		fmt.Println(WarningStyle.Render("🔍 DRY RUN MODE - No actual changes will be made"))
 		fmt.Println()
 	}
-	
+
 	// Execute the command
 	if cmd.RequiresEnv && cmd.EnvHandler != nil {
 		RunWithEnvConfirmation(commandName, cmd.EnvHandler)
@@ -99,7 +104,7 @@ func (r *CLIRouter) Route(args []string) bool {
 		fmt.Printf("No handler defined for command: %s\n", commandName)
 		os.Exit(1)
 	}
-	
+
 	return true
 }
 
@@ -107,12 +112,12 @@ func (r *CLIRouter) Route(args []string) bool {
 func (r *CLIRouter) parseGlobalFlags(args []string) ([]string, GlobalFlags) {
 	var flags GlobalFlags
 	var filteredArgs []string
-	
+
 	// Keep the program name
 	if len(args) > 0 {
 		filteredArgs = append(filteredArgs, args[0])
 	}
-	
+
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
@@ -121,12 +126,14 @@ func (r *CLIRouter) parseGlobalFlags(args []string) ([]string, GlobalFlags) {
 		case "--help", "-h":
 			// Help flag is handled as a command, so include it
 			filteredArgs = append(filteredArgs, arg)
+		case "--version", "-v":
+			flags.Version = true
 		default:
 			// Not a global flag, add to filtered args
 			filteredArgs = append(filteredArgs, arg)
 		}
 	}
-	
+
 	return filteredArgs, flags
 }
 
@@ -137,32 +144,33 @@ func (r *CLIRouter) IsDryRun() bool {
 
 // ShowHelp displays available commands
 func (r *CLIRouter) ShowHelp() {
-	fmt.Println(TitleStyle.Render("Comfy Chair - ComfyUI Development Tool"))
+	fmt.Println(TitleStyle.Render(fmt.Sprintf("Comfy Chair v%s - ComfyUI Development Tool", AppVersion)))
 	fmt.Println()
 	fmt.Println(InfoStyle.Render("Usage: comfy-chair [global-flags] [command]"))
 	fmt.Println()
 	fmt.Println(InfoStyle.Render("Global Flags:"))
 	fmt.Println("  --dry-run, -n    Show what would be done without making changes")
 	fmt.Println("  --help, -h       Show this help message")
+	fmt.Println("  --version, -v    Show the current Comfy Chair version")
 	fmt.Println()
 	fmt.Println(InfoStyle.Render("Available Commands:"))
 	fmt.Println()
-	
+
 	categories := map[string][]*Command{
 		"ComfyUI Management": {},
 		"Development Tools":  {},
 		"Node Management":    {},
 		"Migration Tools":    {},
 		"Environment":        {},
-		"Help":              {},
+		"Help":               {},
 	}
-	
+
 	// Collect unique commands (avoid duplicates from aliases)
 	seen := make(map[string]bool)
 	for _, cmd := range r.commands {
 		if !seen[cmd.Name] {
 			seen[cmd.Name] = true
-			
+
 			// Categorize commands
 			switch {
 			case contains([]string{"start", "background", "stop", "restart", "update", "nightly", "downgrade", "status"}, cmd.Name):
@@ -180,7 +188,7 @@ func (r *CLIRouter) ShowHelp() {
 			}
 		}
 	}
-	
+
 	// Display categorized commands
 	for category, commands := range categories {
 		if len(commands) > 0 {
@@ -195,8 +203,12 @@ func (r *CLIRouter) ShowHelp() {
 			fmt.Println()
 		}
 	}
-	
+
 	fmt.Println(InfoStyle.Render("Run without arguments for interactive menu."))
+}
+
+func (r *CLIRouter) ShowVersion() {
+	fmt.Printf("comfy-chair v%s\n", AppVersion)
 }
 
 // HandleReloadCommand handles the complex reload command logic
@@ -207,13 +219,13 @@ func (r *CLIRouter) HandleReloadCommand() {
 		PromptReturnToMenu()
 		return
 	}
-	
+
 	watchDir := ExpandUserPath(inst.Path)
-	
+
 	// Default values
 	debounce := 5
 	exts := []string{".py", ".js", ".css"}
-	
+
 	// Parse environment variables
 	envVars, err := ReadEnvFile(r.paths.EnvFile)
 	if err == nil {
@@ -232,7 +244,7 @@ func (r *CLIRouter) HandleReloadCommand() {
 			}
 		}
 	}
-	
+
 	// Get included directories from configuration
 	includedDirs := inst.ReloadIncludeDirs
 	if len(includedDirs) == 0 {
@@ -243,19 +255,19 @@ func (r *CLIRouter) HandleReloadCommand() {
 			fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to read custom nodes directory: %v", err)))
 			return
 		}
-		
+
 		var nodeNames []string
 		for _, file := range files {
 			if file.IsDir() {
 				nodeNames = append(nodeNames, file.Name())
 			}
 		}
-		
+
 		if len(nodeNames) == 0 {
 			fmt.Println(InfoStyle.Render("No custom nodes found."))
 			return
 		}
-		
+
 		// Multi-select for directories to watch
 		var selected []string
 		selectPrompt := huh.NewMultiSelect[string]().
@@ -268,14 +280,14 @@ func (r *CLIRouter) HandleReloadCommand() {
 				return opts
 			}, nil).
 			Value(&selected)
-		
+
 		if err := selectPrompt.Run(); err != nil || len(selected) == 0 {
 			fmt.Println(InfoStyle.Render("Reload cancelled - no directories selected."))
 			return
 		}
-		
+
 		includedDirs = selected
-		
+
 		// Save the selection to configuration
 		inst.ReloadIncludeDirs = includedDirs
 		cfg, err := LoadGlobalConfig()
@@ -283,7 +295,7 @@ func (r *CLIRouter) HandleReloadCommand() {
 			SaveGlobalConfig(cfg)
 		}
 	}
-	
+
 	// Call the actual reload function
 	if err := r.reloadFunc(watchDir, debounce, exts, includedDirs); err != nil {
 		fmt.Println(ErrorStyle.Render(fmt.Sprintf("Reload failed: %v", err)))
@@ -331,7 +343,7 @@ func (r *CLIRouter) SetupCLICommands(
 		EnvHandler:  func(inst *ComfyInstall) { startComfyUIFunc(inst, false) },
 		RequiresEnv: true,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "background",
 		Aliases:     []string{"start_bg", "start-bg"},
@@ -339,7 +351,7 @@ func (r *CLIRouter) SetupCLICommands(
 		EnvHandler:  func(inst *ComfyInstall) { startComfyUIFunc(inst, true) },
 		RequiresEnv: true,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "stop",
 		Aliases:     []string{},
@@ -347,7 +359,7 @@ func (r *CLIRouter) SetupCLICommands(
 		EnvHandler:  stopComfyUIFunc,
 		RequiresEnv: true,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "restart",
 		Aliases:     []string{},
@@ -355,7 +367,7 @@ func (r *CLIRouter) SetupCLICommands(
 		EnvHandler:  restartComfyUIFunc,
 		RequiresEnv: true,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "update",
 		Aliases:     []string{},
@@ -379,7 +391,7 @@ func (r *CLIRouter) SetupCLICommands(
 		EnvHandler:  downgradeComfyUIFunc,
 		RequiresEnv: true,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "status",
 		Aliases:     []string{},
@@ -387,7 +399,7 @@ func (r *CLIRouter) SetupCLICommands(
 		EnvHandler:  statusComfyUIFunc,
 		RequiresEnv: true,
 	})
-	
+
 	// Development Tools
 	r.RegisterCommand(&Command{
 		Name:        "reload",
@@ -396,7 +408,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     r.HandleReloadCommand,
 		RequiresEnv: false,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "install",
 		Aliases:     []string{},
@@ -404,7 +416,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     installFunc,
 		RequiresEnv: false,
 	})
-	
+
 	// Node Management
 	r.RegisterCommand(&Command{
 		Name:        "create-node",
@@ -413,7 +425,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     createNodeFunc,
 		RequiresEnv: false,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "list-nodes",
 		Aliases:     []string{"list_nodes"},
@@ -421,7 +433,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     listNodesFunc,
 		RequiresEnv: false,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "delete-node",
 		Aliases:     []string{"delete_node"},
@@ -429,7 +441,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     deleteNodeFunc,
 		RequiresEnv: false,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "pack-node",
 		Aliases:     []string{"pack_node"},
@@ -437,7 +449,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     packNodeFunc,
 		RequiresEnv: false,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "update-nodes",
 		Aliases:     []string{},
@@ -445,7 +457,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     updateNodesFunc,
 		RequiresEnv: false,
 	})
-	
+
 	// Migration Tools
 	r.RegisterCommand(&Command{
 		Name:        "migrate-nodes",
@@ -454,7 +466,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     migrateNodesFunc,
 		RequiresEnv: false,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "migrate-workflows",
 		Aliases:     []string{},
@@ -462,7 +474,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     migrateWorkflowsFunc,
 		RequiresEnv: false,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "migrate-images",
 		Aliases:     []string{},
@@ -470,7 +482,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     migrateImagesFunc,
 		RequiresEnv: false,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "node-workflows",
 		Aliases:     []string{},
@@ -478,7 +490,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     nodeWorkflowsFunc,
 		RequiresEnv: false,
 	})
-	
+
 	// Environment Management
 	r.RegisterCommand(&Command{
 		Name:        "remove-env",
@@ -487,7 +499,7 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     removeEnvFunc,
 		RequiresEnv: false,
 	})
-	
+
 	r.RegisterCommand(&Command{
 		Name:        "sync-env",
 		Aliases:     []string{},
@@ -495,13 +507,21 @@ func (r *CLIRouter) SetupCLICommands(
 		Handler:     syncEnvFunc,
 		RequiresEnv: false,
 	})
-	
+
 	// Help
 	r.RegisterCommand(&Command{
 		Name:        "help",
 		Aliases:     []string{"--help", "-h"},
 		Description: "Show this help message",
 		Handler:     r.ShowHelp,
+		RequiresEnv: false,
+	})
+
+	r.RegisterCommand(&Command{
+		Name:        "version",
+		Aliases:     []string{"--version", "-v"},
+		Description: "Show the current Comfy Chair version",
+		Handler:     r.ShowVersion,
 		RequiresEnv: false,
 	})
 }
