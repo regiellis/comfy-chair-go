@@ -1335,7 +1335,7 @@ func removeEnv() {
 }
 
 func printUsage() {
-	fmt.Println(internal.TitleStyle.Render("Comfy Chair CLI Usage"))
+	fmt.Println(internal.TitleStyle.Render(fmt.Sprintf("Comfy Chair CLI Usage v%s", internal.AppVersion)))
 	fmt.Println("Usage: comfy-chair [command]")
 	fmt.Println("Commands:")
 	fmt.Println("  start, start-fg                   Start ComfyUI in foreground")
@@ -1361,6 +1361,7 @@ func printUsage() {
 	fmt.Println("  node-workflows                    Lets you migrate workflows from selected custom nodes")
 	fmt.Println("  remove_env                        Remove (disconnect) an environment from config")
 	fmt.Println("  help, --help, -h                  Show this help message")
+	fmt.Println("  version, --version, -v            Show the current Comfy Chair version")
 }
 
 func main() {

@@ -45,6 +45,7 @@ const (
 
 // Default values
 const (
+	AppVersion            = "1.5.0"
 	DefaultPort           = 8188
 	DefaultPythonVersion  = "3.13"
 	DefaultReloadExts     = ".py,.js,.css"
