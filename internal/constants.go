@@ -28,7 +28,7 @@ const (
 
 // Default values
 const (
-	AppVersion           = "1.5.0"
+	AppVersion           = "1.6.0"
 	DefaultPythonVersion = "3.13"
 
 	// ComfyUI repository
