@@ -156,6 +156,9 @@ func gitignorePatternToRegex(pattern string) string {
 
 // NOTE: includedDirs is sourced from comfy-installs.json (per environment), not from .env.
 func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds int, exts []string, includedDirs []string) error {
+	if len(includedDirs) == 0 {
+		return fmt.Errorf("no custom node directories selected to watch; run 'watch_nodes' to select them")
+	}
 	// Pid/log files live in the ComfyUI install directory, which is where
 	// startComfyUI writes them for this environment.
 	logFile := internal.ExpandUserPath(filepath.Join(inst.Path, internal.ComfyUILogFile))

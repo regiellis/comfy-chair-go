@@ -3,11 +3,7 @@ package internal
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
-
-	"github.com/charmbracelet/huh"
 )
 
 // CommandHandler represents a function that handles a CLI command
@@ -35,16 +31,14 @@ type Command struct {
 // CLIRouter handles command registration and routing
 type CLIRouter struct {
 	commands   map[string]*Command
-	paths      *Paths
 	reloadFunc func(*ComfyInstall, string, int, []string, []string) error
 	dryRun     bool
 }
 
 // NewCLIRouter creates a new CLI router
-func NewCLIRouter(paths *Paths, reloadFunc func(*ComfyInstall, string, int, []string, []string) error) *CLIRouter {
+func NewCLIRouter(reloadFunc func(*ComfyInstall, string, int, []string, []string) error) *CLIRouter {
 	return &CLIRouter{
 		commands:   make(map[string]*Command),
-		paths:      paths,
 		reloadFunc: reloadFunc,
 	}
 }
@@ -211,7 +205,8 @@ func (r *CLIRouter) ShowVersion() {
 	fmt.Printf("comfy-chair v%s\n", AppVersion)
 }
 
-// HandleReloadCommand handles the complex reload command logic
+// HandleReloadCommand resolves the active install, gathers (and if needed
+// prompts for) the reload settings, and starts the watcher.
 func (r *CLIRouter) HandleReloadCommand() {
 	inst, err := GetActiveComfyInstall()
 	if err != nil {
@@ -220,91 +215,12 @@ func (r *CLIRouter) HandleReloadCommand() {
 		return
 	}
 
-	// The watcher expects the custom_nodes directory as its base; includedDirs
-	// entries are node directory names directly underneath it.
-	watchDir := ExpandUserPath(filepath.Join(inst.Path, CustomNodesDir))
-
-	// Default values
-	debounce := 5
-	exts := []string{".py", ".js", ".css"}
-
-	// Parse environment variables
-	envVars, err := ReadEnvFile(r.paths.EnvFile)
-	if err == nil {
-		if debounceStr, exists := envVars["COMFY_RELOAD_DEBOUNCE"]; exists {
-			if d, err := strconv.Atoi(debounceStr); err == nil {
-				debounce = d
-			}
-		}
-		if extsStr, exists := envVars["COMFY_RELOAD_EXTS"]; exists {
-			if extsStr != "" {
-				extsList := strings.Split(extsStr, ",")
-				exts = make([]string, len(extsList))
-				for i, ext := range extsList {
-					exts[i] = strings.TrimSpace(ext)
-				}
-			}
-		}
-	}
-
-	// Get included directories from configuration
-	includedDirs := inst.ReloadIncludeDirs
+	watchDir, debounce, exts, includedDirs := GetReloadSettings(inst)
 	if len(includedDirs) == 0 {
-		// Prompt user to select directories
-		files, err := os.ReadDir(watchDir)
-		if err != nil {
-			fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to read custom nodes directory: %v", err)))
-			return
-		}
-
-		var nodeNames []string
-		for _, file := range files {
-			if file.IsDir() {
-				nodeNames = append(nodeNames, file.Name())
-			}
-		}
-
-		if len(nodeNames) == 0 {
-			fmt.Println(InfoStyle.Render("No custom nodes found."))
-			return
-		}
-
-		// Multi-select for directories to watch
-		var selected []string
-		selectPrompt := huh.NewMultiSelect[string]().
-			Title("Select custom node directories to watch (space to select, enter to confirm):").
-			OptionsFunc(func() []huh.Option[string] {
-				opts := make([]huh.Option[string], len(nodeNames))
-				for i, name := range nodeNames {
-					opts[i] = huh.NewOption(name, name)
-				}
-				return opts
-			}, nil).
-			Value(&selected)
-
-		if err := selectPrompt.Run(); err != nil || len(selected) == 0 {
-			fmt.Println(InfoStyle.Render("Reload cancelled - no directories selected."))
-			return
-		}
-
-		includedDirs = selected
-
-		// Save the selection to configuration
-		inst.ReloadIncludeDirs = includedDirs
-		cfg, err := LoadGlobalConfig()
-		if err == nil {
-			for i := range cfg.Installs {
-				if cfg.Installs[i].Type == inst.Type {
-					cfg.Installs[i].ReloadIncludeDirs = includedDirs
-				}
-			}
-			if err := SaveGlobalConfig(cfg); err != nil {
-				Log.Error("Failed to save reload directory config: %v", err)
-			}
-		}
+		fmt.Println(InfoStyle.Render("Reload cancelled - no directories selected."))
+		return
 	}
 
-	// Call the actual reload function
 	if err := r.reloadFunc(inst, watchDir, debounce, exts, includedDirs); err != nil {
 		fmt.Println(ErrorStyle.Render(fmt.Sprintf("Reload failed: %v", err)))
 		os.Exit(1)

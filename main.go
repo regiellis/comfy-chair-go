@@ -1216,7 +1216,7 @@ func main() {
 	}
 
 	// Create CLI router and register commands
-	router := internal.NewCLIRouter(&appPaths, reloadComfyUI)
+	router := internal.NewCLIRouter(reloadComfyUI)
 	router.SetupCLICommands(
 		startComfyUI,
 		stopComfyUI,
@@ -1323,14 +1323,7 @@ func handleWatchNodesFunction() {
 		os.Exit(1)
 	}
 
-	// Save to comfy-installs.json
-	cfg, _ := internal.LoadGlobalConfig()
-	for i := range cfg.Installs {
-		if cfg.Installs[i].Type == inst.Type {
-			cfg.Installs[i].ReloadIncludeDirs = selected
-		}
-	}
-	if err := internal.SaveGlobalConfig(cfg); err != nil {
+	if err := internal.SaveReloadIncludeDirs(inst.Type, selected); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update comfy-installs.json: %v", err)))
 		os.Exit(1)
 	}

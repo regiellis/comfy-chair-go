@@ -211,6 +211,21 @@ func (cfg *GlobalConfig) RemoveInstallByType(t InstallType) {
 	}
 }
 
+// SaveReloadIncludeDirs persists the watched-directory selection for the
+// install of the given type to comfy-installs.json.
+func SaveReloadIncludeDirs(t InstallType, dirs []string) error {
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
+	for i := range cfg.Installs {
+		if cfg.Installs[i].Type == t {
+			cfg.Installs[i].ReloadIncludeDirs = dirs
+		}
+	}
+	return SaveGlobalConfig(cfg)
+}
+
 // ExpandUserPath replaces {HOME} and {USERPROFILE} with the user's home directory for cross-platform config paths.
 func ExpandUserPath(path string) string {
 	home, _ := os.UserHomeDir()

@@ -350,12 +350,17 @@ func executeMenuAction(choice string, choices MenuChoices, appPaths *Paths) {
 	}
 }
 
-// GetReloadSettings returns the reload settings for an install
+// GetReloadSettings returns the reload watch settings for an install: the
+// custom_nodes directory to watch, the debounce period, the file extensions,
+// and the watched node directories. If the install has no watched directories
+// configured yet, the user is prompted to select them and the selection is
+// persisted to comfy-installs.json. An empty includedDirs result means the
+// user cancelled or nothing is selectable.
 func GetReloadSettings(inst *ComfyInstall) (watchDir string, debounce int, exts []string, includedDirs []string) {
-	watchDir = ExpandUserPath(filepath.Join(inst.Path, "custom_nodes"))
+	watchDir = ExpandUserPath(filepath.Join(inst.Path, CustomNodesDir))
 	exts = []string{".py", ".js", ".css"}
 	debounce = 5
-	
+
 	if val := os.Getenv("COMFY_RELOAD_EXTS"); val != "" {
 		exts = strings.Split(val, ",")
 		for i := range exts {
@@ -367,44 +372,17 @@ func GetReloadSettings(inst *ComfyInstall) (watchDir string, debounce int, exts 
 			debounce = d
 		}
 	}
+
 	includedDirs = inst.ReloadIncludeDirs
-	
 	if len(includedDirs) == 0 {
-		entries, err := os.ReadDir(watchDir)
-		if err == nil {
-			var nodeOptions []huh.Option[string]
-			for _, entry := range entries {
-				if entry.IsDir() {
-					nodeOptions = append(nodeOptions, huh.NewOption(entry.Name(), entry.Name()))
-				}
-			}
-			var selected []string
-			form := huh.NewForm(huh.NewGroup(
-				huh.NewMultiSelect[string]().Title("Select custom node directories to watch for reloads:").Options(nodeOptions...).Value(&selected),
-			)).WithTheme(huh.ThemeCharm())
-			if err := form.Run(); err != nil {
-				if errors.Is(err, huh.ErrUserAborted) {
-					Log.Info("Using default (all directories)")
-				} else {
-					Log.Error("Form error: %v", err)
-				}
-			} else {
-				includedDirs = selected
-			}
-			// Save to comfy-installs.json
-			cfg, err := LoadGlobalConfig()
-			if err != nil {
-				Log.Error("Failed to load config: %v", err)
-			} else {
-				for i := range cfg.Installs {
-					if cfg.Installs[i].Type == inst.Type {
-						cfg.Installs[i].ReloadIncludeDirs = includedDirs
-					}
-				}
-				if err := SaveGlobalConfig(cfg); err != nil {
-					Log.Error("Failed to save reload directory config: %v", err)
-				}
-			}
+		selected, err := SelectNodeDirectories(watchDir)
+		if err != nil {
+			Log.Info("%v", err)
+			return watchDir, debounce, exts, nil
+		}
+		includedDirs = selected
+		if err := SaveReloadIncludeDirs(inst.Type, includedDirs); err != nil {
+			Log.Error("Failed to save reload directory config: %v", err)
 		}
 	}
 
