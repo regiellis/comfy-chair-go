@@ -47,11 +47,6 @@ func replacePlaceholders(content string, values map[string]string) string {
 	return placeholderRegex.ReplaceAllString(content, "")
 }
 
-// NewZipWriter returns a new zip.Writer for the given file.
-func NewZipWriter(f *os.File) *zip.Writer {
-	return zip.NewWriter(f)
-}
-
 func copyNodeTemplate(dstDir string, values map[string]string, templateType string) error {
 	var templateRoot string
 	switch templateType {
@@ -116,29 +111,16 @@ func copyNodeTemplate(dstDir string, values map[string]string, templateType stri
 		}, dstPath)
 	})
 }
-// input sanitization and validation for node creation
+// sanitizeNodeInput converts a user-entered node name to a safe directory name:
+// spaces become underscores, everything outside [a-zA-Z0-9_-] is dropped.
 func sanitizeNodeInput(input string) string {
-	// Trim whitespace
-	input = strings.TrimSpace(input)
-	
-	// Remove or replace dangerous characters
-	// Replace spaces with underscores
-	input = strings.ReplaceAll(input, " ", "_")
-	
-	// Remove all path-related characters and other dangerous chars
-	dangerousChars := []string{"..", "/", "\\", ":", "*", "?", "\"", "<", ">", "|", "\n", "\r", "\t", "\x00"}
-	for _, char := range dangerousChars {
-		input = strings.ReplaceAll(input, char, "")
-	}
-	
-	// Keep only alphanumeric, underscore, and hyphen
+	input = strings.ReplaceAll(strings.TrimSpace(input), " ", "_")
 	var sanitized strings.Builder
 	for _, r := range input {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
 			sanitized.WriteRune(r)
 		}
 	}
-	
 	return sanitized.String()
 }
 
@@ -601,7 +583,7 @@ func zipDirectory(srcDir, destZip string) error {
 	}
 	defer zipFile.Close()
 
-	zipWriter := NewZipWriter(zipFile)
+	zipWriter := zip.NewWriter(zipFile)
 	defer zipWriter.Close()
 
 	return filepath.Walk(internal.ExpandUserPath(srcDir), func(path string, info os.FileInfo, err error) error {

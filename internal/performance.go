@@ -112,39 +112,6 @@ func RecordPerformanceMetric(metric PerformanceMetric) error {
 	return SavePerformanceHistory(history)
 }
 
-// MeasureStartupTime measures how long ComfyUI takes to start up
-func MeasureStartupTime(envType string, startProcess func() (*os.Process, error)) (time.Duration, *os.Process, error) {
-	startTime := time.Now()
-	process, err := startProcess()
-	if err != nil {
-		return 0, nil, err
-	}
-
-	// Wait for ComfyUI to be ready (check for successful connection on port)
-	// This is a simple approach - in production you might want to check the actual API endpoint
-	timeout := time.After(60 * time.Second) // 60 second timeout
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeout:
-			return time.Since(startTime), process, fmt.Errorf("startup timeout after 60 seconds")
-		case <-ticker.C:
-			// Check if process is still running and ComfyUI might be ready
-			if !IsProcessRunning(process.Pid) {
-				return time.Since(startTime), process, fmt.Errorf("process died during startup")
-			}
-			
-			// Simple heuristic: if it's been running for more than 3 seconds, assume it's ready
-			// In a real implementation, you'd want to check the actual ComfyUI API endpoint
-			if time.Since(startTime) > 3*time.Second {
-				return time.Since(startTime), process, nil
-			}
-		}
-	}
-}
-
 // GetCurrentMemoryUsage returns the current memory usage of a process in MB
 func GetCurrentMemoryUsage(pid int) (float64, error) {
 	if !IsProcessRunning(pid) {

@@ -22,7 +22,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -1210,36 +1209,6 @@ func removeEnv() {
 	fmt.Println(internal.WarningStyle.Render("This will permanently delete all files in the environment directory. Use with caution!"))
 }
 
-func printUsage() {
-	fmt.Println(internal.TitleStyle.Render(fmt.Sprintf("Comfy Chair CLI Usage v%s", internal.AppVersion)))
-	fmt.Println("Usage: comfy-chair [command]")
-	fmt.Println("Commands:")
-	fmt.Println("  start, start-fg                   Start ComfyUI in foreground")
-	fmt.Println("  background, start-bg              Start ComfyUI in background")
-	fmt.Println("  stop                              Stop ComfyUI")
-	fmt.Println("  restart                           Restart ComfyUI")
-	fmt.Println("  update                            Update ComfyUI to latest stable tag")
-	fmt.Println("  nightly                           Update ComfyUI to latest nightly")
-	fmt.Println("  downgrade                         Downgrade ComfyUI to a selected tag")
-	fmt.Println("  reload                            Watch for changes and reload ComfyUI")
-	fmt.Println("  create-node                       Scaffold a new custom node")
-	fmt.Println("  list-nodes                        List all custom nodes")
-	fmt.Println("  delete-node                       Delete a custom node")
-	fmt.Println("  pack-node                         Pack a custom node into a zip file")
-	fmt.Println("  install                           Install or reconfigure ComfyUI")
-	fmt.Println("  status                            Show ComfyUI status and environment")
-	fmt.Println("  update-nodes                      Update selected or all custom nodes using uv")
-	fmt.Println("  watch_nodes                       Custom nodes to watch (all others excluded)")
-	fmt.Println("  sync-env                          Sync .env with .env.example")
-	fmt.Println("  migrate-nodes                     Migrate custom nodes between environments")
-	fmt.Println("  migrate-workflows                 Migrate workflows from one environment to another")
-	fmt.Println("  migrate-images					 Migrate images/videos/audio from one environment to another")
-	fmt.Println("  node-workflows                    Lets you migrate workflows from selected custom nodes")
-	fmt.Println("  remove_env                        Remove (disconnect) an environment from config")
-	fmt.Println("  help, --help, -h                  Show this help message")
-	fmt.Println("  version, --version, -v            Show the current Comfy Chair version")
-}
-
 func main() {
 	if err := initPaths(); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Critical error initializing CLI paths: %v", err)))
@@ -1260,157 +1229,21 @@ func main() {
 		createNewNode,
 		listCustomNodes,
 		deleteCustomNode,
-		packNode, // Changed from packCustomNode
+		packNode,
 		updateCustomNodes,
 		migrateCustomNodes,
 		migrateWorkflows,
-		migrateInputImages,                  // Changed from migrateImages
-		addOrRemoveNodeWorkflows,            // Changed from nodeWorkflows
-		removeEnv,                           // Changed from removeEnvironment
-		func() { _ = syncEnvWithExample() }, // Changed from syncEnvFile
+		migrateInputImages,
+		addOrRemoveNodeWorkflows,
+		removeEnv,
+		func() { _ = syncEnvWithExample() },
+		handleWatchNodesFunction,
 	)
 
-	// Try to route the command
+	// Route the command; unknown commands exit inside Route. If no command
+	// was given (or only global flags), fall back to the interactive menu.
 	if router.Route(os.Args) {
 		return
-	}
-
-	// Fall back to interactive menu if no command provided or recognized
-	// Support short CLI commands (e.g., comfy-chair start, stop, update, etc.)
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "start", "start_fg", "start-fg":
-			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUI(inst, false) })
-			return
-		case "background", "start_bg", "start-bg":
-			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUI(inst, true) })
-			return
-		case "stop":
-			internal.RunWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUI(inst) })
-			return
-		case "restart":
-			internal.RunWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUI(inst) })
-			return
-		case "update":
-			internal.RunWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUI(inst) })
-			return
-		case "nightly", "update-nightly", "nightly-update":
-			internal.RunWithEnvConfirmation("nightly", func(inst *internal.ComfyInstall) { updateComfyUINightly(inst) })
-			return
-		case "downgrade", "update-downgrade":
-			internal.RunWithEnvConfirmation("downgrade", func(inst *internal.ComfyInstall) { downgradeComfyUI(inst) })
-			return
-		case "reload":
-			inst, err := internal.GetActiveComfyInstall()
-			if err != nil {
-				fmt.Println(internal.ErrorStyle.Render(err.Error()))
-				return
-			}
-			watchDir := internal.ExpandUserPath(filepath.Join(inst.Path, "custom_nodes"))
-			exts := []string{".py", ".js", ".css"}
-			debounce := 5
-			if val := os.Getenv("COMFY_RELOAD_EXTS"); val != "" {
-				exts = strings.Split(val, ",")
-				for i := range exts {
-					exts[i] = strings.TrimSpace(exts[i])
-				}
-			}
-			if val := os.Getenv("COMFY_RELOAD_DEBOUNCE"); val != "" {
-				if d, err := strconv.Atoi(val); err == nil && d > 0 {
-					debounce = d
-				}
-			}
-			includedDirs := inst.ReloadIncludeDirs
-			if len(includedDirs) == 0 {
-				entries, err := os.ReadDir(watchDir)
-				if err == nil {
-					var nodeOptions []huh.Option[string]
-					for _, entry := range entries {
-						if entry.IsDir() {
-							nodeOptions = append(nodeOptions, huh.NewOption(entry.Name(), entry.Name()))
-						}
-					}
-					var selected []string
-					form := huh.NewForm(huh.NewGroup(
-						huh.NewMultiSelect[string]().Title("Select custom node directories to watch for reloads:").Options(nodeOptions...).Value(&selected),
-					)).WithTheme(huh.ThemeCharm())
-					if err := form.Run(); err != nil {
-						if errors.Is(err, huh.ErrUserAborted) {
-							internal.Log.Info("Using default (all directories)")
-						} else {
-							internal.Log.Error("Form error: %v", err)
-						}
-					} else {
-						includedDirs = selected
-					}
-					// Save to comfy-installs.json
-					cfg, err := internal.LoadGlobalConfig()
-					if err != nil {
-						internal.Log.Error("Failed to load config: %v", err)
-					} else {
-						for i := range cfg.Installs {
-							if cfg.Installs[i].Type == inst.Type {
-								cfg.Installs[i].ReloadIncludeDirs = includedDirs
-							}
-						}
-						if err := internal.SaveGlobalConfig(cfg); err != nil {
-							internal.Log.Error("Failed to save reload directory config: %v", err)
-						}
-					}
-				}
-			}
-			if err := reloadComfyUI(inst, watchDir, debounce, exts, includedDirs); err != nil {
-				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Reload failed: %v", err)))
-				os.Exit(1)
-			}
-			return
-		case "install":
-			installComfyUI()
-			return
-		case "status":
-			internal.RunWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUI(inst) })
-			return
-		case "update-nodes":
-			updateCustomNodes()
-			return
-		case "create_node", "create-node":
-			createNewNode()
-			return
-		case "list_nodes", "list-nodes":
-			listCustomNodes()
-			return
-		case "delete_node", "delete-node":
-			deleteCustomNode()
-			return
-		case "pack_node", "pack-node":
-			packNode()
-			return
-		case "migrate-nodes":
-			migrateCustomNodes()
-			return
-		case "migrate-workflows":
-			migrateWorkflows()
-			return
-		case "migrate-images":
-			migrateInputImages()
-			return
-		case "node-workflows":
-			addOrRemoveNodeWorkflows()
-			return
-		case "remove-env":
-			removeEnv()
-			return
-		case "sync-env":
-			err := syncEnvWithExample()
-			if err != nil {
-				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to sync .env: %v", err)))
-				os.Exit(1)
-			}
-			os.Exit(0)
-		case "help", "--help", "-h":
-			printUsage()
-			os.Exit(0)
-		}
 	}
 
 	// Initialize menu choices

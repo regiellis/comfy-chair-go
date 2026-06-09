@@ -175,7 +175,7 @@ func (r *CLIRouter) ShowHelp() {
 			switch {
 			case contains([]string{"start", "background", "stop", "restart", "update", "nightly", "downgrade", "status"}, cmd.Name):
 				categories["ComfyUI Management"] = append(categories["ComfyUI Management"], cmd)
-			case contains([]string{"reload", "install"}, cmd.Name):
+			case contains([]string{"reload", "install", "watch_nodes"}, cmd.Name):
 				categories["Development Tools"] = append(categories["Development Tools"], cmd)
 			case contains([]string{"create-node", "list-nodes", "delete-node", "pack-node", "update-nodes"}, cmd.Name):
 				categories["Node Management"] = append(categories["Node Management"], cmd)
@@ -342,6 +342,7 @@ func (r *CLIRouter) SetupCLICommands(
 	nodeWorkflowsFunc func(),
 	removeEnvFunc func(),
 	syncEnvFunc func(),
+	watchNodesFunc func(),
 ) {
 	// ComfyUI Management Commands
 	r.RegisterCommand(&Command{
@@ -460,16 +461,24 @@ func (r *CLIRouter) SetupCLICommands(
 
 	r.RegisterCommand(&Command{
 		Name:        "update-nodes",
-		Aliases:     []string{},
+		Aliases:     []string{"update_nodes"},
 		Description: "Update custom nodes",
 		Handler:     updateNodesFunc,
+		RequiresEnv: false,
+	})
+
+	r.RegisterCommand(&Command{
+		Name:        "watch_nodes",
+		Aliases:     []string{"watch-nodes"},
+		Description: "Select custom nodes to watch for reload (all others excluded)",
+		Handler:     watchNodesFunc,
 		RequiresEnv: false,
 	})
 
 	// Migration Tools
 	r.RegisterCommand(&Command{
 		Name:        "migrate-nodes",
-		Aliases:     []string{},
+		Aliases:     []string{"migrate_nodes"},
 		Description: "Migrate custom nodes between environments",
 		Handler:     migrateNodesFunc,
 		RequiresEnv: false,
@@ -477,7 +486,7 @@ func (r *CLIRouter) SetupCLICommands(
 
 	r.RegisterCommand(&Command{
 		Name:        "migrate-workflows",
-		Aliases:     []string{},
+		Aliases:     []string{"migrate_workflows"},
 		Description: "Migrate workflows between environments",
 		Handler:     migrateWorkflowsFunc,
 		RequiresEnv: false,
@@ -485,7 +494,7 @@ func (r *CLIRouter) SetupCLICommands(
 
 	r.RegisterCommand(&Command{
 		Name:        "migrate-images",
-		Aliases:     []string{},
+		Aliases:     []string{"migrate_images"},
 		Description: "Migrate images/videos/audio between environments",
 		Handler:     migrateImagesFunc,
 		RequiresEnv: false,
@@ -493,7 +502,7 @@ func (r *CLIRouter) SetupCLICommands(
 
 	r.RegisterCommand(&Command{
 		Name:        "node-workflows",
-		Aliases:     []string{},
+		Aliases:     []string{"node_workflows"},
 		Description: "Add/remove custom node workflows in main workflows folder",
 		Handler:     nodeWorkflowsFunc,
 		RequiresEnv: false,
@@ -502,7 +511,7 @@ func (r *CLIRouter) SetupCLICommands(
 	// Environment Management
 	r.RegisterCommand(&Command{
 		Name:        "remove-env",
-		Aliases:     []string{},
+		Aliases:     []string{"remove_env"},
 		Description: "Remove (disconnect) an environment from config",
 		Handler:     removeEnvFunc,
 		RequiresEnv: false,
@@ -510,7 +519,7 @@ func (r *CLIRouter) SetupCLICommands(
 
 	r.RegisterCommand(&Command{
 		Name:        "sync-env",
-		Aliases:     []string{},
+		Aliases:     []string{"sync_env"},
 		Description: "Sync .env with .env.example",
 		Handler:     syncEnvFunc,
 		RequiresEnv: false,

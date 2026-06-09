@@ -26,23 +26,18 @@ var (
 	SuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("40"))  // Green
 	WarningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // Orange
 	TitleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("141"))
-	SpinnerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
 )
-
-// Spinner frames for CLI animations
-var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // Paths struct (exported)
 type Paths struct {
-	CliDir          string
-	EnvFile         string
-	ComfyUIDir      string
-	VenvPath        string
-	VenvPython      string
-	PidFile         string
-	LogFile         string
-	RequirementsTxt string
-	IsConfigured    bool
+	CliDir       string
+	EnvFile      string
+	ComfyUIDir   string
+	VenvPath     string
+	VenvPython   string
+	PidFile      string
+	LogFile      string
+	IsConfigured bool
 }
 
 // InstallType represents the type of ComfyUI install (branded names).
@@ -287,93 +282,6 @@ func UpdateEnvFile(path string, updates map[string]string) error {
 		env[k] = v
 	}
 	return WriteEnvFile(path, env)
-}
-
-// PromptEditEnvFile interactively prompts the user to edit .env variables.
-func PromptEditEnvFile(path string) error {
-	env, _ := ReadEnvFile(path)
-	if len(env) == 0 {
-		Log.Info("No variables found in .env. Starting with an empty file.")
-	}
-
-	// Prepare slices for keys and values
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-
-	// Edit existing variables
-	for _, k := range keys {
-		newVal := env[k]
-		deleteVar := false
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewInput().Title(k).Value(&newVal).Placeholder(env[k]),
-				huh.NewConfirm().Title("Delete this variable?").Value(&deleteVar),
-			),
-		).WithTheme(huh.ThemeCharm())
-		if err := form.Run(); err != nil {
-			if errors.Is(err, huh.ErrUserAborted) {
-				Log.Info("Edit cancelled by user.")
-				return nil
-			}
-			return err
-		}
-		if deleteVar {
-			delete(env, k)
-		} else {
-			env[k] = newVal
-		}
-	}
-
-	// Option to add a new variable
-	addMore := false
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().Title("Add a new variable?").Value(&addMore),
-		),
-	).WithTheme(huh.ThemeCharm())
-	if err := form.Run(); err != nil {
-		if !errors.Is(err, huh.ErrUserAborted) {
-			Log.Error("Form error: %v", err)
-		}
-		addMore = false
-	}
-	for addMore {
-		var newKey, newVal string
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewInput().Title("Variable Name").Value(&newKey),
-				huh.NewInput().Title("Value").Value(&newVal),
-			),
-		).WithTheme(huh.ThemeCharm())
-		if err := form.Run(); err != nil {
-			if errors.Is(err, huh.ErrUserAborted) {
-				break
-			}
-			return err
-		}
-		if newKey != "" {
-			env[newKey] = newVal
-		}
-		form = huh.NewForm(
-			huh.NewGroup(
-				huh.NewConfirm().Title("Add another variable?").Value(&addMore),
-			),
-		).WithTheme(huh.ThemeCharm())
-		if err := form.Run(); err != nil {
-			if !errors.Is(err, huh.ErrUserAborted) {
-				Log.Error("Form error: %v", err)
-			}
-			addMore = false
-		}
-	}
-
-	if err := WriteEnvFile(path, env); err != nil {
-		return err
-	}
-	Log.Success(".env updated successfully.")
-	return nil
 }
 
 // FindVenvPython returns the path to the Python executable in venv or .venv, or an error if not found.

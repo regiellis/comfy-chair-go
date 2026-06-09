@@ -29,12 +29,6 @@ import (
 // MenuAction represents a callback function for menu actions
 type MenuAction func(*ComfyInstall)
 
-// MenuChoice represents a menu choice with its identifier and action
-type MenuChoice struct {
-	ID     string
-	Action MenuAction
-}
-
 // MenuChoices defines the available menu action callbacks
 type MenuChoices struct {
 	StartForeground    MenuAction
@@ -61,7 +55,6 @@ type MenuChoices struct {
 	Status             MenuAction
 	SyncEnv            func() error
 	SetWorkingEnv      func()
-	Performance        func()
 }
 
 // ShowMainMenu displays the main menu loop and handles navigation
@@ -175,7 +168,6 @@ func showNodeManagementMenu() string {
 					huh.NewOption("Select Watched Nodes for Reload", "watch_nodes"),
 					huh.NewOption("Migrate Custom Nodes", "migrate-nodes"),
 					huh.NewOption("Migrate Input Images/Media", "migrate-images"),
-					huh.NewOption("Migrate Node Workflows", "migrate-workflows"),
 					huh.NewOption("Migrate Workflows", "migrate-workflows"),
 					huh.NewOption("Add/Remove Custom Node Workflows", "node_workflows"),
 					huh.NewOption("Main Menu", "back"),
