@@ -203,72 +203,37 @@ func startComfyUI(inst *internal.ComfyInstall, background bool) {
 		args = append(args, strings.Fields(extraFlags)...)
 	}
 
-	// Measure startup time if running in background
-	var startupTime time.Duration
-	var process *os.Process
-	if background {
-		startTime := time.Now()
-		var err error
-		process, err = internal.ExecuteCommand(venvPython, args, comfyDir, logFile, background)
-		if err != nil {
-			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to start ComfyUI: %v", err)))
-			return
-		}
-		startupTime = time.Since(startTime)
-
-		// Record performance metric
-		envType := string(inst.Type)
-
-		// Wait a bit for the process to fully initialize
-		time.Sleep(3 * time.Second)
-
-		memUsage, _ := internal.GetCurrentMemoryUsage(process.Pid)
-		customNodesPath := filepath.Join(comfyDir, "custom_nodes")
-		nodeCount := internal.CountCustomNodes(customNodesPath)
-		logSize := internal.GetLogSize(logFile)
-
-		metric := internal.PerformanceMetric{
-			Timestamp:       time.Now(),
-			Environment:     envType,
-			StartupTime:     startupTime,
-			MemoryUsageMB:   memUsage,
-			ProcessID:       process.Pid,
-			Port:            chosenPort,
-			LogSizeMB:       logSize,
-			CustomNodeCount: nodeCount,
-		}
-
-		// Record the metric (ignore errors to not interrupt startup)
-		_ = internal.RecordPerformanceMetric(metric)
-	} else {
-		var err error
-		process, err = internal.ExecuteCommand(venvPython, args, comfyDir, logFile, background)
-		if err != nil {
-			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to start ComfyUI: %v", err)))
-			return
-		}
+	startTime := time.Now()
+	process, err := internal.ExecuteCommand(venvPython, args, comfyDir, logFile, background)
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to start ComfyUI: %v", err)))
+		return
 	}
 	if background && process != nil {
-		err := internal.WritePID(process.Pid, pidFile)
-		if err != nil {
+		if err := internal.WritePID(process.Pid, pidFile); err != nil {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to write PID file: %v (path: %s)", err, pidFile)))
 			process.Kill()
 			return
 		}
-		// Extra debug: check if file exists and print its contents
-		if _, statErr := os.Stat(pidFile); statErr != nil {
-			fmt.Println(internal.ErrorStyle.Render("PID file was not created"))
-		} else {
-			pidData, readErr := os.ReadFile(pidFile)
-			if readErr != nil {
-				fmt.Println(internal.ErrorStyle.Render("Could not read PID file"))
-			} else {
-				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("PID file created with PID: %s", string(pidData))))
-			}
-		}
 		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("ComfyUI started in background. PID: %d. Log: %s", process.Pid, logFile)))
 		if err := waitForComfyUIReady(logFile); err != nil {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("ComfyUI might not be fully operational: %v", err)))
+		} else {
+			// Record the startup metric now that ComfyUI is actually serving,
+			// so StartupTime reflects time-to-ready rather than process spawn.
+			memUsage, _ := internal.GetCurrentMemoryUsage(process.Pid)
+			metric := internal.PerformanceMetric{
+				Timestamp:       time.Now(),
+				Environment:     string(inst.Type),
+				StartupTime:     time.Since(startTime),
+				MemoryUsageMB:   memUsage,
+				ProcessID:       process.Pid,
+				Port:            chosenPort,
+				LogSizeMB:       internal.GetLogSize(logFile),
+				CustomNodeCount: internal.CountCustomNodes(filepath.Join(comfyDir, internal.CustomNodesDir)),
+			}
+			// Ignore errors to not interrupt startup.
+			_ = internal.RecordPerformanceMetric(metric)
 		}
 	} else if !background {
 		fmt.Println(internal.SuccessStyle.Render("ComfyUI started in foreground. Press Ctrl+C to stop."))

@@ -3,6 +3,7 @@ package internal
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -433,37 +434,77 @@ func checkCustomNodes(inst *ComfyInstall) []HealthCheck {
 	return checks
 }
 
-// checkSystemResources validates system resource availability
+// checkSystemResources reports available system memory. The data comes from
+// /proc/meminfo, so on platforms without it no check is emitted at all rather
+// than a meaningless pass.
 func checkSystemResources() []HealthCheck {
-	var checks []HealthCheck
-
-	// Check available memory (simplified)
-	// This is a basic implementation - in production you'd want more sophisticated monitoring
-	checks = append(checks, HealthCheck{
-		Name:     "System Resources",
+	availMB, err := getAvailableMemoryMB()
+	if err != nil {
+		return nil
+	}
+	if availMB < 2048 {
+		return []HealthCheck{{
+			Name:     "Available Memory",
+			Status:   "warn",
+			Message:  fmt.Sprintf("Only %.0f MB of system memory available", availMB),
+			Category: "system",
+			Severity: "medium",
+			Suggestions: []string{
+				"Close other applications before running large workflows",
+			},
+		}}
+	}
+	return []HealthCheck{{
+		Name:     "Available Memory",
 		Status:   "pass",
-		Message:  "System resource check completed",
+		Message:  fmt.Sprintf("%.1f GB of system memory available", availMB/1024),
 		Category: "system",
 		Severity: "low",
-	})
-
-	return checks
+	}}
 }
 
-// checkNetworkConnectivity tests network access for updates and downloads
-func checkNetworkConnectivity() []HealthCheck {
-	var checks []HealthCheck
+// getAvailableMemoryMB returns MemAvailable from /proc/meminfo in MB.
+// It returns an error on platforms without /proc.
+func getAvailableMemoryMB() (float64, error) {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "MemAvailable:") {
+			var kb float64
+			fmt.Sscanf(line, "MemAvailable: %f kB", &kb)
+			return kb / 1024, nil
+		}
+	}
+	return 0, fmt.Errorf("MemAvailable not found in /proc/meminfo")
+}
 
-	// Basic connectivity check (simplified)
-	checks = append(checks, HealthCheck{
+// checkNetworkConnectivity verifies that github.com is reachable, since
+// installs, updates, and node clones all pull from GitHub.
+func checkNetworkConnectivity() []HealthCheck {
+	conn, err := net.DialTimeout("tcp", "github.com:443", 3*time.Second)
+	if err != nil {
+		return []HealthCheck{{
+			Name:     "Network Connectivity",
+			Status:   "warn",
+			Message:  fmt.Sprintf("Could not reach github.com: %v", err),
+			Category: "network",
+			Severity: "medium",
+			Suggestions: []string{
+				"Updates and node installs require access to github.com",
+				"Check your network connection and proxy settings",
+			},
+		}}
+	}
+	conn.Close()
+	return []HealthCheck{{
 		Name:     "Network Connectivity",
 		Status:   "pass",
-		Message:  "Network connectivity appears normal",
+		Message:  "github.com is reachable",
 		Category: "network",
 		Severity: "low",
-	})
-
-	return checks
+	}}
 }
 
 // analyzeLogFile performs detailed analysis of ComfyUI log files
@@ -558,13 +599,6 @@ func analyzeLogFile(logPath string) LogAnalysis {
 	}
 
 	return analysis
-}
-
-// getDiskUsage returns disk usage percentage for the given path
-func getDiskUsage(path string) float64 {
-	// Simplified implementation - in production you'd use platform-specific calls
-	// This is a placeholder that returns -1 to indicate unavailable
-	return -1
 }
 
 // calculateHealthSummary generates summary statistics from health checks
@@ -678,7 +712,8 @@ func ShowHealthReport() {
 	// Display results by category
 	for _, category := range categoryNames {
 		checks := categories[category]
-		fmt.Println(TitleStyle.Render(strings.Title(category) + " Checks"))
+		title := strings.ToUpper(category[:1]) + category[1:]
+		fmt.Println(TitleStyle.Render(title + " Checks"))
 
 		for _, check := range checks {
 			var statusIcon string

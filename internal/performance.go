@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"runtime"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -18,7 +16,6 @@ type PerformanceMetric struct {
 	Environment     string        `json:"environment"`
 	StartupTime     time.Duration `json:"startup_time_ms"`
 	MemoryUsageMB   float64       `json:"memory_usage_mb"`
-	CPUPercent      float64       `json:"cpu_percent"`
 	ProcessID       int           `json:"process_id"`
 	Port            int           `json:"port"`
 	LogSizeMB       float64       `json:"log_size_mb"`
@@ -112,44 +109,13 @@ func RecordPerformanceMetric(metric PerformanceMetric) error {
 	return SavePerformanceHistory(history)
 }
 
-// GetCurrentMemoryUsage returns the current memory usage of a process in MB
+// GetCurrentMemoryUsage returns the current memory usage of a process in MB.
+// The platform-specific measurement lives in sysinfo_unix.go / sysinfo_windows.go.
 func GetCurrentMemoryUsage(pid int) (float64, error) {
 	if !IsProcessRunning(pid) {
 		return 0, fmt.Errorf("process %d is not running", pid)
 	}
-
-	// Platform-specific memory measurement
-	if runtime.GOOS == "windows" {
-		return getWindowsMemoryUsage(pid)
-	}
-	return getUnixMemoryUsage(pid)
-}
-
-// getUnixMemoryUsage gets memory usage on Unix-like systems
-func getUnixMemoryUsage(pid int) (float64, error) {
-	// Read from /proc/{pid}/status for RSS (Resident Set Size)
-	statusPath := fmt.Sprintf("/proc/%d/status", pid)
-	data, err := os.ReadFile(statusPath)
-	if err != nil {
-		return 0, err
-	}
-
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "VmRSS:") {
-			var memKB float64
-			fmt.Sscanf(line, "VmRSS: %f kB", &memKB)
-			return memKB / 1024, nil // Convert KB to MB
-		}
-	}
-	return 0, fmt.Errorf("could not parse memory usage from /proc/%d/status", pid)
-}
-
-// getWindowsMemoryUsage gets memory usage on Windows (simplified implementation)
-func getWindowsMemoryUsage(pid int) (float64, error) {
-	// This is a simplified implementation
-	// In a real implementation, you'd use Windows API calls
-	return 0, fmt.Errorf("Windows memory monitoring not yet implemented")
+	return getProcessMemoryMB(pid)
 }
 
 // GetLogSize returns the size of the ComfyUI log file in MB
