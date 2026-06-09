@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -49,12 +48,9 @@ const (
 )
 
 // GetPerformanceHistoryPath returns the path to the performance history file
+// in the user config directory, migrating it from the legacy location on first use.
 func GetPerformanceHistoryPath() (string, error) {
-	exePath, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(filepath.Dir(exePath), PerformanceHistoryFile), nil
+	return ResolveStateFile(PerformanceHistoryFile)
 }
 
 // LoadPerformanceHistory loads the performance history from disk

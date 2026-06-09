@@ -76,13 +76,65 @@ type GlobalConfig struct {
 // ConfigFileName is the name of the global config file.
 const ConfigFileName = "comfy-installs.json"
 
-// GetConfigFilePath returns the path to the global config file (next to the binary).
-func GetConfigFilePath() (string, error) {
+// GetConfigDir returns the per-user comfy-chair configuration directory,
+// creating it if needed. Falls back to the legacy binary-adjacent directory
+// when the user config directory cannot be determined.
+func GetConfigDir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return LegacyConfigDir()
+	}
+	dir := filepath.Join(base, "comfy-chair")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create config directory %s: %w", dir, err)
+	}
+	return dir, nil
+}
+
+// LegacyConfigDir returns the directory next to the binary where versions
+// before v1.6 stored state files (.env, comfy-installs.json, performance history).
+func LegacyConfigDir() (string, error) {
 	exePath, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(filepath.Dir(exePath), ConfigFileName), nil
+	return filepath.Dir(exePath), nil
+}
+
+// ResolveStateFile returns the path of a state file inside the user config
+// directory. If the file does not exist there yet but does exist in the
+// legacy binary-adjacent location, it is copied over once so existing setups
+// keep working after the binary moves.
+func ResolveStateFile(name string) (string, error) {
+	configDir, err := GetConfigDir()
+	if err != nil {
+		return "", err
+	}
+	newPath := filepath.Join(configDir, name)
+	if _, err := os.Stat(newPath); err == nil {
+		return newPath, nil
+	}
+	legacyDir, err := LegacyConfigDir()
+	if err != nil || legacyDir == configDir {
+		return newPath, nil
+	}
+	legacyPath := filepath.Join(legacyDir, name)
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		return newPath, nil // nothing to migrate
+	}
+	if err := os.WriteFile(newPath, data, 0644); err != nil {
+		// Migration failed (e.g. permissions); keep using the legacy file.
+		return legacyPath, nil
+	}
+	Log.Info("Migrated %s from %s to %s", name, legacyDir, configDir)
+	return newPath, nil
+}
+
+// GetConfigFilePath returns the path to the global config file in the user
+// config directory, migrating it from the legacy location on first use.
+func GetConfigFilePath() (string, error) {
+	return ResolveStateFile(ConfigFileName)
 }
 
 // LoadGlobalConfig loads the global config from disk, or returns an empty config if not found.

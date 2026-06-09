@@ -73,53 +73,47 @@ func stripQuotes(s string) string {
 	return s
 }
 
-// initPaths initializes application paths, prioritizing .env file.
+// initPaths initializes application paths. The .env file lives in the
+// per-user config directory (migrated from the legacy binary-adjacent
+// location on first run); pid/log files live in the ComfyUI install directory.
 func initPaths() error {
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
 	appPaths.CliDir = internal.ExpandUserPath(filepath.Dir(exePath))
-	appPaths.EnvFile = internal.ExpandUserPath(filepath.Join(appPaths.CliDir, internal.EnvFileName))
-	appPaths.PidFile = internal.ExpandUserPath(filepath.Join(appPaths.CliDir, internal.ComfyUIPidFile))
-	appPaths.LogFile = internal.ExpandUserPath(filepath.Join(appPaths.CliDir, internal.ComfyUILogFile))
 	appPaths.IsConfigured = false
 
-	// Load .env file from CLI directory
-	err = godotenv.Load(appPaths.EnvFile)
-	if (err != nil) && (!os.IsNotExist(err)) {
-		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Could not load .env file at %s: %v", appPaths.EnvFile, err)))
-		// If .env does not exist, it's not an error yet.
+	envFile, err := internal.ResolveStateFile(internal.EnvFileName)
+	if err != nil {
+		return fmt.Errorf("failed to resolve config directory: %w", err)
 	}
+	appPaths.EnvFile = internal.ExpandUserPath(envFile)
 
-	// .env validation: check required variables
-	requiredEnv := []string{internal.ComfyUIPathKey}
-	missing := []string{}
-	for _, key := range requiredEnv {
-		if os.Getenv(key) == "" {
-			missing = append(missing, key)
+	if _, err := os.Stat(appPaths.EnvFile); err == nil {
+		if err := godotenv.Load(appPaths.EnvFile); err != nil {
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Could not load .env file at %s: %v", appPaths.EnvFile, err)))
 		}
-	}
-	if len(missing) > 0 {
-		fmt.Println(internal.WarningStyle.Render("Warning: The following required .env variables are missing:"))
-		for _, key := range missing {
-			fmt.Println("  - " + key)
-		}
-		fmt.Println(internal.InfoStyle.Render("Please set them in your .env file before using all features."))
+	} else {
+		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("No %s file found at %s.", internal.EnvFileName, appPaths.EnvFile)))
+		fmt.Println(internal.InfoStyle.Render("Example .env content:"))
+		fmt.Println("COMFYUI_PATH=/path/to/your/ComfyUI")
 	}
 
-	comfyPathFromEnv := os.Getenv(internal.ComfyUIPathKey)
-	comfyPathFromEnv = stripQuotes(comfyPathFromEnv)
+	if os.Getenv(internal.ComfyUIPathKey) == "" {
+		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: required variable %s is not set. Please set it in %s before using all features.", internal.ComfyUIPathKey, appPaths.EnvFile)))
+	}
 
+	comfyPathFromEnv := stripQuotes(os.Getenv(internal.ComfyUIPathKey))
 	if comfyPathFromEnv != "" {
 		absComfyPath, pathErr := filepath.Abs(comfyPathFromEnv)
 		if pathErr != nil {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: COMFYUI_PATH '%s' from .env is not a valid path: %v. Ignoring.", comfyPathFromEnv, pathErr)))
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: COMFYUI_PATH '%s' is not a valid path: %v. Ignoring.", comfyPathFromEnv, pathErr)))
 		} else if stat, err := os.Stat(internal.ExpandUserPath(absComfyPath)); err == nil && stat.IsDir() {
 			appPaths.ComfyUIDir = internal.ExpandUserPath(absComfyPath)
 			appPaths.IsConfigured = true
 		} else {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: COMFYUI_PATH '%s' from .env is not a valid directory. Current value: '%s'. Ignoring.", comfyPathFromEnv, absComfyPath)))
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: COMFYUI_PATH '%s' is not a valid directory. Current value: '%s'. Ignoring.", comfyPathFromEnv, absComfyPath)))
 		}
 	}
 
@@ -129,148 +123,37 @@ func initPaths() error {
 		if stat, err := os.Stat(defaultComfyDir); err == nil && stat.IsDir() {
 			appPaths.ComfyUIDir = defaultComfyDir // It's already absolute if cliDir is.
 			appPaths.IsConfigured = true
-			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("No %s found or COMFYUI_PATH not set. Using default ComfyUI location: %s", internal.EnvFileName, appPaths.ComfyUIDir)))
+			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("COMFYUI_PATH not set. Using default ComfyUI location: %s", appPaths.ComfyUIDir)))
 		}
 	}
 
-	if appPaths.IsConfigured {
-		// Use FindVenvPython to set appPaths.VenvPython and appPaths.VenvPath
-		venvPython, err := internal.FindVenvPython(appPaths.ComfyUIDir)
-		if err == nil {
-			appPaths.VenvPython = internal.ExpandUserPath(venvPython)
-			appPaths.VenvPath = internal.ExpandUserPath(filepath.Dir(filepath.Dir(venvPython)))
-		} else {
-			// Default to venv for error messages
-			appPaths.VenvPath = internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, ".venv"))
-			if runtime.GOOS == "windows" {
-				appPaths.VenvPython = internal.ExpandUserPath(filepath.Join(appPaths.VenvPath, "Scripts", "python.exe"))
-			} else {
-				appPaths.VenvPython = internal.ExpandUserPath(filepath.Join(appPaths.VenvPath, "bin", "python"))
-			}
-		}
-
-		if _, err := os.Stat(internal.ExpandUserPath(appPaths.ComfyUIDir)); os.IsNotExist(err) {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Configured ComfyUI directory not found at %s.", appPaths.ComfyUIDir)))
-			appPaths.IsConfigured = false // Mark as not configured if dir doesn't exist
-		} else {
-			if venvErr := func() error {
-				_, err := internal.FindVenvPython(appPaths.ComfyUIDir)
-				return err
-			}(); venvErr != nil && appPaths.IsConfigured {
-				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Python executable not found in 'venv' or '.venv' under %s. The virtual environment might need setup via the 'Install' option.", appPaths.ComfyUIDir)))
-			}
-		}
-	} else {
-		fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("ComfyUI path is not configured. Use the 'Install/Reconfigure ComfyUI' option to set it up, or create a %s file in %s with COMFYUI_PATH.", internal.EnvFileName, appPaths.CliDir)))
-	}
-
-	envPaths := []string{internal.ExpandUserPath(filepath.Join(appPaths.CliDir, internal.EnvFileName))}
-	// Add platform-specific config paths
-	switch runtime.GOOS {
-	case "linux":
-		xdgConfig := os.Getenv("XDG_CONFIG_HOME")
-		if xdgConfig != "" {
-			envPaths = append(envPaths, internal.ExpandUserPath(filepath.Join(xdgConfig, "comfy-chair", internal.EnvFileName)))
-		}
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			envPaths = append(envPaths, internal.ExpandUserPath(filepath.Join(home, ".config", "comfy-chair", internal.EnvFileName)))
-		}
-	case "darwin":
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			envPaths = append(envPaths, internal.ExpandUserPath(filepath.Join(home, "Library", "Application Support", "comfy-chair", internal.EnvFileName)))
-		}
-	case "windows":
-		appData := os.Getenv("APPDATA")
-		if appData != "" {
-			envPaths = append(envPaths, internal.ExpandUserPath(filepath.Join(appData, "comfy-chair", internal.EnvFileName)))
-		}
-	}
-
-	foundEnv := false
-	for _, envPath := range envPaths {
-		if _, err := os.Stat(internal.ExpandUserPath(envPath)); err == nil {
-			appPaths.EnvFile = internal.ExpandUserPath(envPath)
-			err = godotenv.Load(appPaths.EnvFile)
-			if err != nil {
-				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Could not load .env file at %s: %v", appPaths.EnvFile, err)))
-			} else {
-				foundEnv = true
-				break
-			}
-		}
-	}
-
-	if !foundEnv {
-		fmt.Println(internal.ErrorStyle.Render("No .env file found. Please create a .env file with COMFYUI_PATH set to your ComfyUI installation directory."))
-		fmt.Println(internal.InfoStyle.Render("Example .env content:"))
-		fmt.Println("COMFYUI_PATH=/path/to/your/ComfyUI")
-		appPaths.IsConfigured = false
+	if !appPaths.IsConfigured {
+		fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("ComfyUI path is not configured. Use the 'Install/Reconfigure ComfyUI' option to set it up, or set COMFYUI_PATH in %s.", appPaths.EnvFile)))
 		return nil
 	}
 
-	if comfyPathFromEnv != "" {
-		absComfyPath, pathErr := filepath.Abs(comfyPathFromEnv)
-		if pathErr != nil {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: COMFYUI_PATH '%s' from .env is not a valid path: %v. Ignoring.", comfyPathFromEnv, pathErr)))
-		} else if stat, err := os.Stat(internal.ExpandUserPath(absComfyPath)); err == nil && stat.IsDir() {
-			appPaths.ComfyUIDir = internal.ExpandUserPath(absComfyPath)
-			appPaths.IsConfigured = true
-		} else {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: COMFYUI_PATH '%s' from .env is not a valid directory. Current value: '%s'. Ignoring.", comfyPathFromEnv, absComfyPath)))
-		}
-	}
-
-	// If not configured via .env, try default location (ComfyUI subdirectory next to CLI)
-	if !appPaths.IsConfigured {
-		defaultComfyDir := internal.ExpandUserPath(filepath.Join(appPaths.CliDir, comfyUIDirNameDefault))
-		if stat, err := os.Stat(defaultComfyDir); err == nil && stat.IsDir() {
-			appPaths.ComfyUIDir = defaultComfyDir // It's already absolute if cliDir is.
-			appPaths.IsConfigured = true
-			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("No %s found or COMFYUI_PATH not set. Using default ComfyUI location: %s", internal.EnvFileName, appPaths.ComfyUIDir)))
-		}
-	}
-
-	if appPaths.IsConfigured {
-		// Use FindVenvPython to set appPaths.VenvPython and appPaths.VenvPath
-		venvPython, err := internal.FindVenvPython(appPaths.ComfyUIDir)
-		if err == nil {
-			appPaths.VenvPython = internal.ExpandUserPath(venvPython)
-			appPaths.VenvPath = internal.ExpandUserPath(filepath.Dir(filepath.Dir(venvPython)))
-		} else {
-			// Default to venv for error messages
-			appPaths.VenvPath = internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "venv"))
-			if runtime.GOOS == "windows" {
-				appPaths.VenvPython = internal.ExpandUserPath(filepath.Join(appPaths.VenvPath, "Scripts", "python.exe"))
-			} else {
-				appPaths.VenvPython = internal.ExpandUserPath(filepath.Join(appPaths.VenvPath, "bin", "python"))
-			}
-		}
-
-		if _, err := os.Stat(internal.ExpandUserPath(appPaths.ComfyUIDir)); os.IsNotExist(err) {
-			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Configured ComfyUI directory not found at %s.", appPaths.ComfyUIDir)))
-			appPaths.IsConfigured = false // Mark as not configured if dir doesn't exist
-		} else {
-			if venvErr := func() error {
-				_, err := internal.FindVenvPython(appPaths.ComfyUIDir)
-				return err
-			}(); venvErr != nil && appPaths.IsConfigured {
-				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Python executable not found in virtual environment: %s. The venv might need setup via the 'Install' option.", appPaths.VenvPython)))
-			}
-		}
+	// Resolve venv paths; pid/log files live alongside the ComfyUI install.
+	venvPython, err := internal.FindVenvPython(appPaths.ComfyUIDir)
+	if err == nil {
+		appPaths.VenvPython = internal.ExpandUserPath(venvPython)
+		appPaths.VenvPath = internal.ExpandUserPath(filepath.Dir(filepath.Dir(venvPython)))
 	} else {
-		fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("ComfyUI path is not configured. Use the 'Install/Reconfigure ComfyUI' option to set it up, or create a %s file in %s with COMFYUI_PATH.", internal.EnvFileName, appPaths.CliDir)))
+		// Default to venv for error messages
+		appPaths.VenvPath = internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, internal.VenvDir))
+		if runtime.GOOS == "windows" {
+			appPaths.VenvPython = internal.ExpandUserPath(filepath.Join(appPaths.VenvPath, "Scripts", "python.exe"))
+		} else {
+			appPaths.VenvPython = internal.ExpandUserPath(filepath.Join(appPaths.VenvPath, "bin", "python"))
+		}
+		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: Python executable not found in 'venv' or '.venv' under %s. The virtual environment might need setup via the 'Install' option.", appPaths.ComfyUIDir)))
 	}
+	appPaths.PidFile = internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, internal.ComfyUIPidFile))
+	appPaths.LogFile = internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, internal.ComfyUILogFile))
 	return nil
 }
 
-func startComfyUI(background bool) {
-	inst, err := internal.GetActiveComfyInstall()
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(err.Error()))
-		return
-	}
+// startComfyUI starts ComfyUI for the given environment, foreground/background.
+func startComfyUI(inst *internal.ComfyInstall, background bool) {
 	comfyDir := inst.Path
 	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(comfyDir))
 	if err != nil {
@@ -335,11 +218,7 @@ func startComfyUI(background bool) {
 		startupTime = time.Since(startTime)
 
 		// Record performance metric
-		inst, _ := internal.GetActiveComfyInstall()
-		envType := "unknown"
-		if inst != nil {
-			envType = string(inst.Type)
-		}
+		envType := string(inst.Type)
 
 		// Wait a bit for the process to fully initialize
 		time.Sleep(3 * time.Second)
@@ -389,7 +268,7 @@ func startComfyUI(background bool) {
 			}
 		}
 		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("ComfyUI started in background. PID: %d. Log: %s", process.Pid, logFile)))
-		if err := waitForComfyUIReady(); err != nil {
+		if err := waitForComfyUIReady(logFile); err != nil {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("ComfyUI might not be fully operational: %v", err)))
 		}
 	} else if !background {
@@ -397,12 +276,8 @@ func startComfyUI(background bool) {
 	}
 }
 
-func updateComfyUI() {
-	inst, err := internal.GetActiveComfyInstall()
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(err.Error()))
-		return
-	}
+// updateComfyUI updates ComfyUI to the latest stable tag for the given environment.
+func updateComfyUI(inst *internal.ComfyInstall) {
 	comfyDir := inst.Path
 	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(comfyDir))
 	if err != nil {
@@ -449,12 +324,8 @@ func updateComfyUI() {
 	internal.PromptReturnToMenu()
 }
 
-func updateComfyUINightly() {
-	inst, err := internal.GetActiveComfyInstall()
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(err.Error()))
-		return
-	}
+// updateComfyUINightly updates ComfyUI to the latest nightly for the given environment.
+func updateComfyUINightly(inst *internal.ComfyInstall) {
 	comfyDir := inst.Path
 	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(comfyDir))
 	if err != nil {
@@ -485,12 +356,8 @@ func updateComfyUINightly() {
 	internal.PromptReturnToMenu()
 }
 
-func downgradeComfyUI() {
-	inst, err := internal.GetActiveComfyInstall()
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(err.Error()))
-		return
-	}
+// downgradeComfyUI downgrades ComfyUI to a selected tag for the given environment.
+func downgradeComfyUI(inst *internal.ComfyInstall) {
 	comfyDir := inst.Path
 	venvPython, err := internal.FindVenvPython(internal.ExpandUserPath(comfyDir))
 	if err != nil {
@@ -883,7 +750,7 @@ func installComfyUI() {
 				internal.Log.Error("Form error: %v", err)
 			}
 		} else if zluda {
-			comfyRepo = "git@github.com:patientx/ComfyUI-Zluda.git"
+			comfyRepo = "https://github.com/patientx/ComfyUI-Zluda.git"
 			fmt.Println(internal.WarningStyle.Render("Using ComfyUI-Zluda repo for AMD (experimental)."))
 		} else {
 			fmt.Println(internal.InfoStyle.Render("Using standard ComfyUI repo for AMD."))
@@ -924,7 +791,12 @@ func installComfyUI() {
 			}
 			if action == "update" {
 				fmt.Println(internal.InfoStyle.Render("Updating existing ComfyUI install..."))
-				updateComfyUI()
+				// Update the install at the path the user entered, not the active environment.
+				updateComfyUI(&internal.ComfyInstall{
+					Name: envType,
+					Type: internal.InstallType(envType),
+					Path: installPath,
+				})
 				return
 			}
 			if action == "replace" {
@@ -1014,10 +886,6 @@ func installComfyUI() {
 	}
 
 	installPath = filepath.Clean(strings.TrimSpace(installPath))
-	if err != nil {
-		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Invalid installation path %s: %v", installPath, err)))
-		return
-	}
 	systemPythonExec = strings.TrimSpace(systemPythonExec)
 	if _, err := os.Stat(systemPythonExec); os.IsNotExist(err) {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Provided Python executable not found at: %s", systemPythonExec)))
@@ -1093,7 +961,10 @@ func installComfyUI() {
 	venvCreated := false
 	if uvErr == nil {
 		fmt.Println(internal.InfoStyle.Render("Using 'uv venv' to create virtual environment..."))
-		venvArgs := []string{"venv", "--relocatable", "--python", "3.12", "--python-preference", "only-managed", currentInstallVenvPath}
+		if pythonVersion == "" {
+			pythonVersion = internal.DefaultPythonVersion
+		}
+		venvArgs := []string{"venv", "--relocatable", "--python", pythonVersion, "--python-preference", "only-managed", currentInstallVenvPath}
 		_, errCmd := internal.ExecuteCommand(uvPath, venvArgs, installPath, "", false)
 		if errCmd != nil {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("'uv venv' failed: %v. Falling back to python -m venv...", errCmd)))
@@ -1156,6 +1027,11 @@ func installComfyUI() {
 			}
 			fmt.Println(internal.SuccessStyle.Render("Dependencies installed successfully (via uv)."))
 		}
+	}
+
+	// 4. Install GPU-specific PyTorch (replaces the default wheels from requirements.txt)
+	if err := internal.InstallTorchForGPU(installPath, currentInstallVenvPath, gpuType, envVars); err != nil {
+		fmt.Println(internal.WarningStyle.Render(err.Error()))
 	}
 
 	// --- Install default custom nodes ---
@@ -1373,13 +1249,13 @@ func main() {
 	// Create CLI router and register commands
 	router := internal.NewCLIRouter(&appPaths, reloadComfyUI)
 	router.SetupCLICommands(
-		startComfyUIWithEnv,
-		stopComfyUIWithEnv,
-		restartComfyUIWithEnv,
-		updateComfyUIWithEnv,
-		updateComfyUINightlyWithEnv,
-		downgradeComfyUIWithEnv,
-		statusComfyUIWithEnv,
+		startComfyUI,
+		stopComfyUI,
+		restartComfyUI,
+		updateComfyUI,
+		updateComfyUINightly,
+		downgradeComfyUI,
+		statusComfyUI,
 		installComfyUI,
 		createNewNode,
 		listCustomNodes,
@@ -1404,25 +1280,25 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "start", "start_fg", "start-fg":
-			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, false) })
+			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUI(inst, false) })
 			return
 		case "background", "start_bg", "start-bg":
-			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, true) })
+			internal.RunWithEnvConfirmation("start", func(inst *internal.ComfyInstall) { startComfyUI(inst, true) })
 			return
 		case "stop":
-			internal.RunWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("stop", func(inst *internal.ComfyInstall) { stopComfyUI(inst) })
 			return
 		case "restart":
-			internal.RunWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("restart", func(inst *internal.ComfyInstall) { restartComfyUI(inst) })
 			return
 		case "update":
-			internal.RunWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("update", func(inst *internal.ComfyInstall) { updateComfyUI(inst) })
 			return
 		case "nightly", "update-nightly", "nightly-update":
-			internal.RunWithEnvConfirmation("nightly", func(inst *internal.ComfyInstall) { updateComfyUINightlyWithEnv(inst) })
+			internal.RunWithEnvConfirmation("nightly", func(inst *internal.ComfyInstall) { updateComfyUINightly(inst) })
 			return
 		case "downgrade", "update-downgrade":
-			internal.RunWithEnvConfirmation("downgrade", func(inst *internal.ComfyInstall) { downgradeComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("downgrade", func(inst *internal.ComfyInstall) { downgradeComfyUI(inst) })
 			return
 		case "reload":
 			inst, err := internal.GetActiveComfyInstall()
@@ -1483,7 +1359,7 @@ func main() {
 					}
 				}
 			}
-			if err := reloadComfyUI(watchDir, debounce, exts, includedDirs); err != nil {
+			if err := reloadComfyUI(inst, watchDir, debounce, exts, includedDirs); err != nil {
 				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Reload failed: %v", err)))
 				os.Exit(1)
 			}
@@ -1492,7 +1368,7 @@ func main() {
 			installComfyUI()
 			return
 		case "status":
-			internal.RunWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) })
+			internal.RunWithEnvConfirmation("status", func(inst *internal.ComfyInstall) { statusComfyUI(inst) })
 			return
 		case "update-nodes":
 			updateCustomNodes()
@@ -1539,13 +1415,13 @@ func main() {
 
 	// Initialize menu choices
 	menuChoices := internal.MenuChoices{
-		StartForeground:  func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, false) },
-		StartBackground:  func(inst *internal.ComfyInstall) { startComfyUIWithEnv(inst, true) },
-		Stop:             func(inst *internal.ComfyInstall) { stopComfyUIWithEnv(inst) },
-		Restart:          func(inst *internal.ComfyInstall) { restartComfyUIWithEnv(inst) },
-		Update:           func(inst *internal.ComfyInstall) { updateComfyUIWithEnv(inst) },
-		UpdateNightly:    func(inst *internal.ComfyInstall) { updateComfyUINightlyWithEnv(inst) },
-		Downgrade:        func(inst *internal.ComfyInstall) { downgradeComfyUIWithEnv(inst) },
+		StartForeground:  func(inst *internal.ComfyInstall) { startComfyUI(inst, false) },
+		StartBackground:  func(inst *internal.ComfyInstall) { startComfyUI(inst, true) },
+		Stop:             func(inst *internal.ComfyInstall) { stopComfyUI(inst) },
+		Restart:          func(inst *internal.ComfyInstall) { restartComfyUI(inst) },
+		Update:           func(inst *internal.ComfyInstall) { updateComfyUI(inst) },
+		UpdateNightly:    func(inst *internal.ComfyInstall) { updateComfyUINightly(inst) },
+		Downgrade:        func(inst *internal.ComfyInstall) { downgradeComfyUI(inst) },
 		Install:          installComfyUI,
 		CreateNode:       createNewNode,
 		ListNodes:        listCustomNodes,
@@ -1560,7 +1436,7 @@ func main() {
 		RemoveEnv:        removeEnv,
 		Reload:           func() { handleReloadFunction() },
 		WatchNodes:       func() { handleWatchNodesFunction() },
-		Status:           func(inst *internal.ComfyInstall) { statusComfyUIWithEnv(inst) },
+		Status:           func(inst *internal.ComfyInstall) { statusComfyUI(inst) },
 		SyncEnv:          syncEnvWithExample,
 		SetWorkingEnv:    func() { handleSetWorkingEnvFunction() },
 	}
@@ -1586,7 +1462,7 @@ func handleReloadFunction() {
 		return
 	}
 	watchDir, debounce, exts, includedDirs := internal.GetReloadSettings(inst)
-	if err := reloadComfyUI(watchDir, debounce, exts, includedDirs); err != nil {
+	if err := reloadComfyUI(inst, watchDir, debounce, exts, includedDirs); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Reload failed: %v", err)))
 	}
 }
@@ -1672,24 +1548,25 @@ func handleSetWorkingEnvFunction() {
 	}
 }
 
-// waitForComfyUIReady waits for ComfyUI to be ready by checking the log file for a specific string.
-func waitForComfyUIReady() error {
+// waitForComfyUIReady waits for ComfyUI to be ready by checking its log file for a specific string.
+func waitForComfyUIReady(logFilePath string) error {
 	startTime := time.Now()
 	for {
 		if time.Since(startTime) > maxWaitTime {
 			return fmt.Errorf("timeout waiting for ComfyUI to be ready")
 		}
-		logFile, err := os.Open(internal.ExpandUserPath(appPaths.LogFile))
+		logFile, err := os.Open(internal.ExpandUserPath(logFilePath))
 		if err != nil {
 			return fmt.Errorf("failed to open log file: %w", err)
 		}
-		defer logFile.Close()
 		scanner := bufio.NewScanner(logFile)
 		for scanner.Scan() {
 			if strings.Contains(scanner.Text(), comfyReadyString) {
+				logFile.Close()
 				return nil
 			}
 		}
+		logFile.Close()
 		time.Sleep(1 * time.Second)
 	}
 }
@@ -1708,44 +1585,9 @@ func waitForComfyUIStop(pid int) error {
 	}
 }
 
-// startComfyUIWithEnv starts ComfyUI for the given environment, foreground/background.
-func startComfyUIWithEnv(inst *internal.ComfyInstall, background bool) {
-	oldDir := appPaths.ComfyUIDir
-	appPaths.ComfyUIDir = inst.Path
-	defer func() { appPaths.ComfyUIDir = oldDir }()
-	startComfyUI(background)
-}
-
-// updateComfyUIWithEnv updates ComfyUI for the given environment.
-func updateComfyUIWithEnv(inst *internal.ComfyInstall) {
-	oldDir := appPaths.ComfyUIDir
-	appPaths.ComfyUIDir = inst.Path
-	defer func() { appPaths.ComfyUIDir = oldDir }()
-	updateComfyUI()
-}
-
-// updateComfyUINightlyWithEnv updates ComfyUI nightly for the given environment.
-func updateComfyUINightlyWithEnv(inst *internal.ComfyInstall) {
-	oldDir := appPaths.ComfyUIDir
-	appPaths.ComfyUIDir = inst.Path
-	defer func() { appPaths.ComfyUIDir = oldDir }()
-	updateComfyUINightly()
-}
-
-// downgradeComfyUIWithEnv downgrades ComfyUI to a selected tag for the given environment.
-func downgradeComfyUIWithEnv(inst *internal.ComfyInstall) {
-	oldDir := appPaths.ComfyUIDir
-	appPaths.ComfyUIDir = inst.Path
-	defer func() { appPaths.ComfyUIDir = oldDir }()
-	downgradeComfyUI()
-}
-
-// stopComfyUIWithEnv stops ComfyUI for the given environment.
-func stopComfyUIWithEnv(inst *internal.ComfyInstall) {
-	oldDir := appPaths.ComfyUIDir
-	appPaths.ComfyUIDir = inst.Path
-	defer func() { appPaths.ComfyUIDir = oldDir }()
-	pidFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "comfyui.pid"))
+// stopComfyUI stops ComfyUI for the given environment.
+func stopComfyUI(inst *internal.ComfyInstall) {
+	pidFile := internal.ExpandUserPath(filepath.Join(inst.Path, internal.ComfyUIPidFile))
 	if pid, isRunning := internal.GetRunningPID(pidFile); isRunning {
 		process, err := os.FindProcess(pid)
 		if err == nil {
@@ -1764,19 +1606,16 @@ func stopComfyUIWithEnv(inst *internal.ComfyInstall) {
 	}
 }
 
-// restartComfyUIWithEnv restarts ComfyUI for the given environment.
-func restartComfyUIWithEnv(inst *internal.ComfyInstall) {
-	stopComfyUIWithEnv(inst)
-	startComfyUIWithEnv(inst, true)
+// restartComfyUI restarts ComfyUI in the background for the given environment.
+func restartComfyUI(inst *internal.ComfyInstall) {
+	stopComfyUI(inst)
+	startComfyUI(inst, true)
 }
 
-// statusComfyUIWithEnv shows status for the given environment, with color and formatting (no table).
-func statusComfyUIWithEnv(inst *internal.ComfyInstall) {
-	oldDir := appPaths.ComfyUIDir
-	appPaths.ComfyUIDir = inst.Path
-	defer func() { appPaths.ComfyUIDir = oldDir }()
-	pidFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "comfyui.pid"))
-	logFile := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, "comfyui.log"))
+// statusComfyUI shows status for the given environment, with color and formatting (no table).
+func statusComfyUI(inst *internal.ComfyInstall) {
+	pidFile := internal.ExpandUserPath(filepath.Join(inst.Path, internal.ComfyUIPidFile))
+	logFile := internal.ExpandUserPath(filepath.Join(inst.Path, internal.ComfyUILogFile))
 	pid, isRunning := internal.GetRunningPID(pidFile)
 
 	// Gather log info
@@ -1910,11 +1749,11 @@ func manageBrandedEnvironments() {
 			}
 			fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("%s set as default environment.", labels[envType])))
 		case "update":
-			updateComfyUIWithEnv(inst)
+			updateComfyUI(inst)
 		case "nightly":
-			updateComfyUINightlyWithEnv(inst)
+			updateComfyUINightly(inst)
 		case "downgrade":
-			downgradeComfyUIWithEnv(inst)
+			downgradeComfyUI(inst)
 		case "remove":
 			removeEnv()
 			return
@@ -2397,9 +2236,13 @@ func migrateCustomNodes() {
 }
 
 // syncEnvWithExample copies missing keys from .env.example to .env, preserving existing values.
+// The example file is looked up next to the .env file first, then next to the binary.
 func syncEnvWithExample() error {
 	envPath := appPaths.EnvFile
 	examplePath := envPath + ".example"
+	if _, err := os.Stat(examplePath); os.IsNotExist(err) {
+		examplePath = filepath.Join(appPaths.CliDir, internal.EnvFileName+".example")
+	}
 	existing, err := internal.ReadEnvFile(envPath)
 	if err != nil {
 		return fmt.Errorf("failed to read .env: %w", err)

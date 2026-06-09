@@ -36,12 +36,12 @@ type Command struct {
 type CLIRouter struct {
 	commands   map[string]*Command
 	paths      *Paths
-	reloadFunc func(string, int, []string, []string) error
+	reloadFunc func(*ComfyInstall, string, int, []string, []string) error
 	dryRun     bool
 }
 
 // NewCLIRouter creates a new CLI router
-func NewCLIRouter(paths *Paths, reloadFunc func(string, int, []string, []string) error) *CLIRouter {
+func NewCLIRouter(paths *Paths, reloadFunc func(*ComfyInstall, string, int, []string, []string) error) *CLIRouter {
 	return &CLIRouter{
 		commands:   make(map[string]*Command),
 		paths:      paths,
@@ -220,7 +220,9 @@ func (r *CLIRouter) HandleReloadCommand() {
 		return
 	}
 
-	watchDir := ExpandUserPath(inst.Path)
+	// The watcher expects the custom_nodes directory as its base; includedDirs
+	// entries are node directory names directly underneath it.
+	watchDir := ExpandUserPath(filepath.Join(inst.Path, CustomNodesDir))
 
 	// Default values
 	debounce := 5
@@ -249,8 +251,7 @@ func (r *CLIRouter) HandleReloadCommand() {
 	includedDirs := inst.ReloadIncludeDirs
 	if len(includedDirs) == 0 {
 		// Prompt user to select directories
-		customNodesDir := ExpandUserPath(filepath.Join(watchDir, "custom_nodes"))
-		files, err := os.ReadDir(customNodesDir)
+		files, err := os.ReadDir(watchDir)
 		if err != nil {
 			fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to read custom nodes directory: %v", err)))
 			return
@@ -292,12 +293,19 @@ func (r *CLIRouter) HandleReloadCommand() {
 		inst.ReloadIncludeDirs = includedDirs
 		cfg, err := LoadGlobalConfig()
 		if err == nil {
-			SaveGlobalConfig(cfg)
+			for i := range cfg.Installs {
+				if cfg.Installs[i].Type == inst.Type {
+					cfg.Installs[i].ReloadIncludeDirs = includedDirs
+				}
+			}
+			if err := SaveGlobalConfig(cfg); err != nil {
+				Log.Error("Failed to save reload directory config: %v", err)
+			}
 		}
 	}
 
 	// Call the actual reload function
-	if err := r.reloadFunc(watchDir, debounce, exts, includedDirs); err != nil {
+	if err := r.reloadFunc(inst, watchDir, debounce, exts, includedDirs); err != nil {
 		fmt.Println(ErrorStyle.Render(fmt.Sprintf("Reload failed: %v", err)))
 		os.Exit(1)
 	}

@@ -154,11 +154,14 @@ func gitignorePatternToRegex(pattern string) string {
 	return pattern
 }
 
-// NOTE: includedDirs is now sourced from comfy-installs.json (per environment) via main.go, not from .env.
-func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, includedDirs []string) error {
-	logFile := appPaths.LogFile
-	if logFile == "" {
-		return fmt.Errorf("log file path is not set")
+// NOTE: includedDirs is sourced from comfy-installs.json (per environment), not from .env.
+func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds int, exts []string, includedDirs []string) error {
+	// Pid/log files live in the ComfyUI install directory, which is where
+	// startComfyUI writes them for this environment.
+	logFile := internal.ExpandUserPath(filepath.Join(inst.Path, internal.ComfyUILogFile))
+	pidFile := internal.ExpandUserPath(filepath.Join(inst.Path, internal.ComfyUIPidFile))
+	if logFile == "" || pidFile == "" {
+		return fmt.Errorf("could not determine the ComfyUI log/pid file paths for %s", inst.Path)
 	}
 
 	// Start tailing the log file in a goroutine
@@ -195,10 +198,10 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 		}
 	}()
 
-	pid, _ := internal.ReadPID(appPaths.PidFile)
+	pid, _ := internal.ReadPID(pidFile)
 	if !internal.IsProcessRunning(pid) {
 		fmt.Println(internal.SuccessStyle.Render("Starting ComfyUI..."))
-		startComfyUI(true)
+		startComfyUI(inst, true)
 		// Give it a moment to start
 		time.Sleep(2 * time.Second)
 	}
@@ -341,7 +344,7 @@ func reloadComfyUI(watchDir string, debounceSeconds int, exts []string, included
 			if (event.Op.Has(fsnotify.Write) || event.Op.Has(fsnotify.Create)) && matched {
 				if time.Since(lastRestartTime) > debounceDuration {
 					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", relativePath)))
-					restartComfyUIProcess()
+					restartComfyUIProcess(inst, pidFile)
 					lastRestartTime = time.Now()
 				} else {
 					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Change detected in %s, but debouncing... (%.1fs remaining)", relativePath, debounceDuration.Seconds()-time.Since(lastRestartTime).Seconds())))
@@ -367,8 +370,8 @@ func matchesExtension(filePath string, exts []string) bool {
 	return false
 }
 
-func restartComfyUIProcess() {
-	pid, isRunning := internal.GetRunningPID(appPaths.PidFile)
+func restartComfyUIProcess(inst *internal.ComfyInstall, pidFile string) {
+	pid, isRunning := internal.GetRunningPID(pidFile)
 	if isRunning {
 		process, err := os.FindProcess(pid)
 		if err == nil {
@@ -404,12 +407,12 @@ func restartComfyUIProcess() {
 		} else {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Could not find process to kill (PID: %d): %v", pid, err)))
 		}
-		internal.CleanupPIDFile(appPaths.PidFile)
+		internal.CleanupPIDFile(pidFile)
 	} else if pid != 0 { // Stale PID file
 		fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Removing stale PID file for PID %d.", pid)))
-		internal.CleanupPIDFile(appPaths.PidFile)
+		internal.CleanupPIDFile(pidFile)
 	}
-	startComfyUI(true)
+	startComfyUI(inst, true)
 }
 
 func isWindows() bool {

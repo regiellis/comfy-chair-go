@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -41,6 +42,68 @@ func resolveTorchInstallCommand(gpuType string, envVars map[string]string) ([]st
 	default:
 		return defaultTorchInstallCommand(gpuType), ""
 	}
+}
+
+// InstallTorchForGPU installs the GPU-appropriate torch/torchvision/torchaudio
+// build into the venv at venvPath, replacing the default wheels pulled in by
+// requirements.txt. GPU types without an automated install path (apple,
+// ascend, cambricon) only print manual-install guidance.
+func InstallTorchForGPU(comfyDir, venvPath, gpuType string, envVars map[string]string) error {
+	gpuType = strings.ToLower(strings.TrimSpace(gpuType))
+	if gpuType == "" {
+		Log.Info("GPU_TYPE not set; keeping the default PyTorch from requirements.txt.")
+		return nil
+	}
+
+	switch gpuType {
+	case "apple":
+		Log.Info("Apple Silicon: follow the official PyTorch instructions for the Metal backend: https://developer.apple.com/metal/pytorch/")
+		return nil
+	case "ascend":
+		Log.Info("Ascend NPU: follow the official torch-npu install instructions: https://www.hiascend.com/software/modelzoo/tool/torch-npu")
+		return nil
+	case "cambricon":
+		Log.Info("Cambricon MLU: follow the official torch_mlu install instructions: https://www.cambricon.com/")
+		return nil
+	}
+
+	torchCmd, torchCmdSource := resolveTorchInstallCommand(gpuType, envVars)
+	if len(torchCmd) == 0 {
+		Log.Warning("Unknown GPU type %q; skipping GPU-specific PyTorch install.", gpuType)
+		return nil
+	}
+
+	venvBin := filepath.Join(venvPath, "bin")
+	if runtime.GOOS == "windows" {
+		venvBin = filepath.Join(venvPath, "Scripts")
+	}
+	uvPath := filepath.Join(venvBin, "uv")
+	if stat, err := os.Stat(uvPath); err != nil || stat.IsDir() {
+		uvSys, err := exec.LookPath("uv")
+		if err != nil {
+			return fmt.Errorf("uv not found; install uv and re-run the install to get the GPU-specific PyTorch build")
+		}
+		uvPath = uvSys
+	}
+
+	if torchCmdSource != "" {
+		Log.Info("Installing PyTorch for your GPU using %s from .env...", torchCmdSource)
+	} else {
+		Log.Info("Installing PyTorch for your GPU (%s)...", gpuType)
+	}
+	cmd := exec.Command(uvPath, append([]string{"pip"}, torchCmd...)...)
+	cmd.Dir = ExpandUserPath(comfyDir)
+	cmd.Env = append(os.Environ(),
+		"VIRTUAL_ENV="+ExpandUserPath(venvPath),
+		"PATH="+venvBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("PyTorch install failed: %w (you may need to install manually; see the README)", err)
+	}
+	Log.Success("PyTorch installed successfully for your GPU.")
+	return nil
 }
 
 var defaultCustomNodes = []struct {
