@@ -23,7 +23,7 @@ func (p *PIDFile) Read() (int, error) {
 	if expandedPath == "" {
 		return 0, fmt.Errorf("invalid PID file path")
 	}
-	
+
 	data, err := os.ReadFile(expandedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -31,20 +31,20 @@ func (p *PIDFile) Read() (int, error) {
 		}
 		return 0, fmt.Errorf("failed to read PID file: %w", err)
 	}
-	
+
 	if len(data) == 0 {
 		return 0, fmt.Errorf("PID file is empty")
 	}
-	
+
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return 0, fmt.Errorf("invalid PID format: %w", err)
 	}
-	
+
 	if pid <= 0 {
 		return 0, fmt.Errorf("invalid PID value: %d", pid)
 	}
-	
+
 	return pid, nil
 }
 
@@ -53,12 +53,12 @@ func (p *PIDFile) Write(pid int) error {
 	if pid <= 0 {
 		return fmt.Errorf("invalid PID value: %d", pid)
 	}
-	
+
 	expandedPath := ExpandUserPath(p.path)
 	if expandedPath == "" {
 		return fmt.Errorf("invalid PID file path")
 	}
-	
+
 	return DryRunExecute("Write PID %d to file %s", func() error {
 		data := fmt.Sprintf("%d", pid)
 		return os.WriteFile(expandedPath, []byte(data), 0644)
@@ -71,7 +71,7 @@ func (p *PIDFile) Remove() error {
 	if expandedPath == "" {
 		return fmt.Errorf("invalid PID file path")
 	}
-	
+
 	return DryRunExecute("Remove PID file %s", func() error {
 		err := os.Remove(expandedPath)
 		if err != nil && !os.IsNotExist(err) {
@@ -91,10 +91,10 @@ func (p *PIDFile) GetRunningPID() (pid int, isRunning bool) {
 		}
 		return 0, false
 	}
-	
+
 	if IsProcessRunning(pid) {
 		return pid, true
 	}
-	
+
 	return pid, false // PID read, but process not running (stale)
 }

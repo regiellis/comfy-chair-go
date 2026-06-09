@@ -31,30 +31,30 @@ type MenuAction func(*ComfyInstall)
 
 // MenuChoices defines the available menu action callbacks
 type MenuChoices struct {
-	StartForeground    MenuAction
-	StartBackground    MenuAction
-	Stop               MenuAction
-	Restart            MenuAction
-	Update             MenuAction
-	UpdateNightly      MenuAction
-	Downgrade          MenuAction
-	Install            func()
-	CreateNode         func()
-	ListNodes          func()
-	DeleteNode         func()
-	PackNode           func()
-	UpdateNodes        func()
-	MigrateNodes       func()
-	MigrateWorkflows   func()
-	MigrateImages      func()
-	NodeWorkflows      func()
-	ManageEnvs         func()
-	RemoveEnv          func()
-	Reload             func()
-	WatchNodes         func()
-	Status             MenuAction
-	SyncEnv            func() error
-	SetWorkingEnv      func()
+	StartForeground  MenuAction
+	StartBackground  MenuAction
+	Stop             MenuAction
+	Restart          MenuAction
+	Update           MenuAction
+	UpdateNightly    MenuAction
+	Downgrade        MenuAction
+	Install          func()
+	CreateNode       func()
+	ListNodes        func()
+	DeleteNode       func()
+	PackNode         func()
+	UpdateNodes      func()
+	MigrateNodes     func()
+	MigrateWorkflows func()
+	MigrateImages    func()
+	NodeWorkflows    func()
+	ManageEnvs       func()
+	RemoveEnv        func()
+	Reload           func()
+	WatchNodes       func()
+	Status           MenuAction
+	SyncEnv          func() error
+	SetWorkingEnv    func()
 }
 
 // ShowMainMenu displays the main menu loop and handles navigation
@@ -453,18 +453,18 @@ func SelectNodeDirectories(customNodesDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read custom_nodes directory: %w", err)
 	}
-	
+
 	var nodeDirs []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			nodeDirs = append(nodeDirs, entry.Name())
 		}
 	}
-	
+
 	if len(nodeDirs) == 0 {
 		return nil, fmt.Errorf("no custom node directories found to watch")
 	}
-	
+
 	var selected []string
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -480,13 +480,13 @@ func SelectNodeDirectories(customNodesDir string) ([]string, error) {
 				Value(&selected),
 		),
 	).WithTheme(huh.ThemeCharm())
-	
+
 	if err := form.Run(); err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
 			return nil, fmt.Errorf("operation cancelled by user")
 		}
 		return nil, fmt.Errorf("error running form: %w", err)
 	}
-	
+
 	return selected, nil
 }

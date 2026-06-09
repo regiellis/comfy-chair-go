@@ -159,7 +159,7 @@ func CalculatePerformanceSummary(history *PerformanceHistory) *PerformanceSummar
 	var maxMemory float64
 	minStartup := history.Metrics[0].StartupTime
 	maxStartup := history.Metrics[0].StartupTime
-	
+
 	envCounts := make(map[string]int)
 	weekAgo := time.Now().AddDate(0, 0, -7)
 	lastWeekCount := 0
@@ -179,7 +179,7 @@ func CalculatePerformanceSummary(history *PerformanceHistory) *PerformanceSummar
 		}
 
 		envCounts[metric.Environment]++
-		
+
 		if metric.Timestamp.After(weekAgo) {
 			lastWeekCount++
 		}
@@ -291,7 +291,7 @@ func ShowPerformanceMenu() {
 				).
 				Value(&choice),
 		)).WithTheme(huh.ThemeCharm())
-		
+
 		if err := form.Run(); err != nil || choice == "back" || choice == "" {
 			return
 		}

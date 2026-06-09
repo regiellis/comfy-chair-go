@@ -36,21 +36,21 @@ type HealthReport struct {
 
 // HealthSummary provides an overview of the health report
 type HealthSummary struct {
-	TotalChecks   int `json:"total_checks"`
-	PassedChecks  int `json:"passed_checks"`
-	WarningChecks int `json:"warning_checks"`
-	FailedChecks  int `json:"failed_checks"`
+	TotalChecks    int `json:"total_checks"`
+	PassedChecks   int `json:"passed_checks"`
+	WarningChecks  int `json:"warning_checks"`
+	FailedChecks   int `json:"failed_checks"`
 	CriticalIssues int `json:"critical_issues"`
 }
 
 // LogAnalysis contains results from log file analysis
 type LogAnalysis struct {
-	ErrorCount       int      `json:"error_count"`
-	WarningCount     int      `json:"warning_count"`
-	StartupTime      string   `json:"startup_time"`
-	CriticalErrors   []string `json:"critical_errors"`
-	CommonIssues     []string `json:"common_issues"`
-	RecentErrors     []string `json:"recent_errors"`
+	ErrorCount        int      `json:"error_count"`
+	WarningCount      int      `json:"warning_count"`
+	StartupTime       string   `json:"startup_time"`
+	CriticalErrors    []string `json:"critical_errors"`
+	CommonIssues      []string `json:"common_issues"`
+	RecentErrors      []string `json:"recent_errors"`
 	PerformanceIssues []string `json:"performance_issues"`
 }
 
@@ -157,7 +157,7 @@ func checkEnvironmentConfiguration(inst *ComfyInstall) []HealthCheck {
 	// Check for virtual environment
 	venvPath := ExpandUserPath(filepath.Join(inst.Path, "venv"))
 	altVenvPath := ExpandUserPath(filepath.Join(inst.Path, ".venv"))
-	
+
 	if _, err := os.Stat(venvPath); os.IsNotExist(err) {
 		if _, err := os.Stat(altVenvPath); os.IsNotExist(err) {
 			checks = append(checks, HealthCheck{
@@ -544,11 +544,11 @@ func analyzeLogFile(logPath string) LogAnalysis {
 
 	scanner := bufio.NewScanner(file)
 	lineCount := 0
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		lineCount++
-		
+
 		// Skip if too many lines (performance optimization)
 		if lineCount > 10000 {
 			break
@@ -561,11 +561,11 @@ func analyzeLogFile(logPath string) LogAnalysis {
 				if len(analysis.RecentErrors) < 10 {
 					analysis.RecentErrors = append(analysis.RecentErrors, line)
 				}
-				
+
 				// Check for critical errors
 				if strings.Contains(strings.ToLower(line), "critical") ||
-				   strings.Contains(strings.ToLower(line), "fatal") ||
-				   strings.Contains(strings.ToLower(line), "crash") {
+					strings.Contains(strings.ToLower(line), "fatal") ||
+					strings.Contains(strings.ToLower(line), "crash") {
 					if len(analysis.CriticalErrors) < 5 {
 						analysis.CriticalErrors = append(analysis.CriticalErrors, line)
 					}
@@ -684,9 +684,9 @@ func ShowHealthReport() {
 		scoreStatus = "Good"
 	}
 
-	fmt.Printf("\n%s %s (%d/100)\n", 
-		scoreColor.Render("Overall Health Score:"), 
-		scoreStatus, 
+	fmt.Printf("\n%s %s (%d/100)\n",
+		scoreColor.Render("Overall Health Score:"),
+		scoreStatus,
 		report.OverallScore)
 
 	fmt.Printf("Environment: %s | Checks: %d total, %d passed, %d warnings, %d failed\n\n",
@@ -730,7 +730,7 @@ func ShowHealthReport() {
 				statusText = ErrorStyle.Render(statusIcon + " " + check.Name)
 			}
 
-			fmt.Printf("  %s %s\n", 
+			fmt.Printf("  %s %s\n",
 				statusText,
 				check.Message)
 
@@ -843,7 +843,7 @@ func showEnvironmentValidation() {
 			statusText = ErrorStyle.Render("✗ " + check.Name)
 		}
 
-		fmt.Printf("%s: %s\n", 
+		fmt.Printf("%s: %s\n",
 			statusText,
 			check.Message)
 	}

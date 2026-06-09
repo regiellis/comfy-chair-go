@@ -47,19 +47,19 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 	if commandName == "" {
 		return nil, fmt.Errorf("command name cannot be empty")
 	}
-	
+
 	// Validate command name to prevent command injection
 	if err := validateCommand(commandName); err != nil {
 		return nil, fmt.Errorf("invalid command: %w", err)
 	}
-	
+
 	// Validate all arguments
 	for i, arg := range args {
 		if err := validateArgument(arg); err != nil {
 			return nil, fmt.Errorf("invalid argument at position %d: %w", i, err)
 		}
 	}
-	
+
 	// Validate working directory if provided
 	if workDir != "" {
 		cleanWorkDir := filepath.Clean(ExpandUserPath(workDir))
@@ -108,7 +108,7 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 		if err := cmd.Start(); err != nil {
 			return nil, fmt.Errorf("command '%s %s' execution failed: %w", commandName, strings.Join(args, " "), err)
 		}
-		
+
 		// Wait for the process to complete (this allows Ctrl+C to work properly)
 		waitErr := cmd.Wait()
 		// Return the process even if Wait failed - the process did run
@@ -134,13 +134,13 @@ func CleanupPIDFile(pidFile string) {
 func (pc *ProcessCache) cleanupStaleEntries() {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	
+
 	now := time.Now()
 	// Clean up every 5 minutes
 	if time.Since(pc.lastCleanup) < 5*time.Minute {
 		return
 	}
-	
+
 	// Remove entries older than 30 seconds
 	for pid, status := range pc.cache {
 		if time.Since(status.LastCheck) > 30*time.Second {
@@ -154,7 +154,7 @@ func (pc *ProcessCache) cleanupStaleEntries() {
 func (pc *ProcessCache) getCachedStatus(pid int) (ProcessStatus, bool) {
 	pc.mu.RLock()
 	defer pc.mu.RUnlock()
-	
+
 	status, exists := pc.cache[pid]
 	return status, exists
 }
@@ -163,7 +163,7 @@ func (pc *ProcessCache) getCachedStatus(pid int) (ProcessStatus, bool) {
 func (pc *ProcessCache) updateCache(pid int, isRunning bool) {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	
+
 	pc.cache[pid] = ProcessStatus{
 		IsRunning: isRunning,
 		LastCheck: time.Now(),
@@ -188,7 +188,7 @@ func isProcessRunningReal(pid int) bool {
 		if err != nil { // tasklist command failed or process not found (often an error)
 			return false
 		}
-		
+
 		// Parse CSV output to check for exact PID match
 		// CSV format: "process.exe","PID","Session Name","Session#","Mem Usage"
 		lines := strings.Split(string(output), "\n")
@@ -197,14 +197,14 @@ func isProcessRunningReal(pid int) bool {
 			if line == "" {
 				continue
 			}
-			
+
 			// Split CSV fields
 			fields := strings.Split(line, ",")
 			if len(fields) >= 2 {
 				// Extract PID field (second field) and remove quotes
 				pidField := strings.Trim(fields[1], "\"")
 				pidField = strings.TrimSpace(pidField)
-				
+
 				// Check for exact match
 				if pidField == strconv.Itoa(pid) {
 					return true
@@ -281,13 +281,13 @@ func validateCommand(cmd string) error {
 				return fmt.Errorf("command contains dangerous character: %s", char)
 			}
 		}
-		
+
 		// Don't allow path traversal in command names
 		if strings.Contains(cmd, "..") {
 			return fmt.Errorf("command contains path traversal sequence")
 		}
 	}
-	
+
 	return nil
 }
 
@@ -298,11 +298,11 @@ func validateArgument(arg string) error {
 	if strings.Contains(arg, "\x00") {
 		return fmt.Errorf("argument contains null byte")
 	}
-	
+
 	// Very long arguments could indicate an attack
 	if len(arg) > 8192 {
 		return fmt.Errorf("argument too long (max 8192 characters)")
 	}
-	
+
 	return nil
 }

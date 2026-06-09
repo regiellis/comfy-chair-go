@@ -236,16 +236,16 @@ func ExpandUserPath(path string) string {
 			path = strings.ReplaceAll(path, "{USERPROFILE}", userProfile)
 		}
 	}
-	
+
 	// Clean the path and validate it doesn't contain traversal sequences
 	cleanPath := filepath.Clean(path)
-	
+
 	// Check for path traversal attempts after expansion
 	if containsPathTraversal(cleanPath) {
 		// Return empty string for invalid paths - callers should check for this
 		return ""
 	}
-	
+
 	return cleanPath
 }
 
@@ -259,7 +259,7 @@ func containsPathTraversal(path string) bool {
 			return true
 		}
 	}
-	
+
 	// Additional check for absolute paths trying to access system directories
 	if runtime.GOOS != "windows" {
 		// On Unix-like systems, check for attempts to access sensitive system paths
@@ -270,7 +270,7 @@ func containsPathTraversal(path string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -369,12 +369,12 @@ func HandleFormError(err error, operationName string) bool {
 	if err == nil {
 		return false // No error, continue
 	}
-	
+
 	if errors.Is(err, huh.ErrUserAborted) {
 		Log.Info("%s cancelled by user.", operationName)
 		return true // User cancelled, should exit
 	}
-	
+
 	Log.Error("Form error during %s: %v", operationName, err)
 	return true // Error occurred, should exit
 }

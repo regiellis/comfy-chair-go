@@ -65,52 +65,53 @@ func copyNodeTemplate(dstDir string, values map[string]string, templateType stri
 		if err != nil {
 			return err
 		}
-		
+
 		// Skip the root template directory itself
 		if path == templateRoot {
 			return nil
 		}
-		
+
 		// Calculate relative path from template root
 		relPath := strings.TrimPrefix(path, templateRoot+"/")
 		if relPath == "" || relPath == path {
 			// This shouldn't happen, but skip if we can't get a proper relative path
 			return nil
 		}
-		
+
 		dstPath := filepath.Join(dstDir, relPath)
-		
+
 		// For files/directories with placeholders in the name
 		for k, v := range values {
 			if strings.Contains(dstPath, k) {
 				dstPath = strings.ReplaceAll(dstPath, k, v)
 			}
 		}
-		
+
 		if d.IsDir() {
 			return internal.DryRunExecute("Create directory: %s", func() error {
 				return os.MkdirAll(dstPath, 0755)
 			}, dstPath)
 		}
-		
+
 		data, err := nodeTemplateFS.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		
+
 		// Ensure parent directory exists
 		if err := internal.DryRunExecute("Create parent directory: %s", func() error {
 			return os.MkdirAll(filepath.Dir(dstPath), 0755)
 		}, filepath.Dir(dstPath)); err != nil {
 			return err
 		}
-		
+
 		content := replacePlaceholders(string(data), values)
 		return internal.DryRunExecute("Create file: %s", func() error {
 			return os.WriteFile(dstPath, []byte(content), 0644)
 		}, dstPath)
 	})
 }
+
 // sanitizeNodeInput converts a user-entered node name to a safe directory name:
 // spaces become underscores, everything outside [a-zA-Z0-9_-] is dropped.
 func sanitizeNodeInput(input string) string {
@@ -718,7 +719,7 @@ func updateCustomNodes() {
 			if err := internal.EnsurePipCompatibility(venvPath, uvPath); err != nil {
 				fmt.Println(internal.WarningStyle.Render("Warning: Could not ensure pip compatibility, proceeding anyway"))
 			}
-			
+
 			fmt.Println(internal.InfoStyle.Render("Trying uv pip install -r requirements.txt ..."))
 			cmdUv := exec.Command(uvPath, "pip", "install", "-r", relReqFile)
 			cmdUv.Dir = internal.ExpandUserPath(appPaths.ComfyUIDir)
@@ -726,7 +727,7 @@ func updateCustomNodes() {
 			cmdUv.Stdout = os.Stdout
 			cmdUv.Stderr = os.Stderr
 			installErr = cmdUv.Run()
-			
+
 			if installErr != nil {
 				// Attempt to detect and fix pip/uv conflicts
 				if fixedErr := internal.DetectAndFixPipUvConflict(installErr, venvPath, uvPath); fixedErr == nil {

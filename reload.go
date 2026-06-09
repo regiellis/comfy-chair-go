@@ -46,14 +46,14 @@ func shouldIgnorePath(path string, basePath string) bool {
 	if err != nil {
 		relPath = path
 	}
-	
+
 	// Check against common ignore patterns
 	for _, pattern := range commonIgnorePatterns {
 		if pattern.MatchString(relPath) || pattern.MatchString(filepath.Base(path)) {
 			return true
 		}
 	}
-	
+
 	// Check for .gitignore in the directory and parent directories
 	return checkGitignore(path, basePath)
 }
@@ -69,7 +69,7 @@ func checkGitignore(targetPath string, basePath string) bool {
 				return true
 			}
 		}
-		
+
 		// Stop if we've reached the base path or root
 		if currentDir == basePath || currentDir == filepath.Dir(currentDir) {
 			break
@@ -86,31 +86,31 @@ func isIgnoredByGitignore(targetPath string, gitignorePath string, gitignoreDir 
 		return false
 	}
 	defer file.Close()
-	
+
 	// Get relative path from gitignore directory
 	relPath, err := filepath.Rel(gitignoreDir, targetPath)
 	if err != nil {
 		return false
 	}
-	
+
 	// Convert to forward slashes for pattern matching
 	relPath = filepath.ToSlash(relPath)
-	
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		
+
 		// Handle negation patterns (starting with !)
 		isNegation := strings.HasPrefix(line, "!")
 		if isNegation {
 			line = line[1:]
 		}
-		
+
 		// Convert gitignore pattern to regex
 		pattern := gitignorePatternToRegex(line)
 		matched, err := regexp.MatchString(pattern, relPath)
@@ -123,13 +123,13 @@ func isIgnoredByGitignore(targetPath string, gitignorePath string, gitignoreDir 
 			return true
 		}
 	}
-	
+
 	// Check for scanner errors
 	if err := scanner.Err(); err != nil {
 		// Log error but don't fail - treat as not ignored
 		fmt.Fprintf(os.Stderr, "Warning: error reading .gitignore file: %v\n", err)
 	}
-	
+
 	return false
 }
 
@@ -139,18 +139,18 @@ func gitignorePatternToRegex(pattern string) string {
 	pattern = regexp.MustCompile(`[.+^${}()|\[\]\\]`).ReplaceAllStringFunc(pattern, func(s string) string {
 		return "\\" + s
 	})
-	
+
 	// Convert gitignore wildcards to regex
 	pattern = strings.ReplaceAll(pattern, "*", "[^/]*")
 	pattern = strings.ReplaceAll(pattern, "?", "[^/]")
-	
+
 	// Handle directory patterns (ending with /)
 	if strings.HasSuffix(pattern, "/") {
 		pattern = pattern[:len(pattern)-1] + "(/.*)?$"
 	} else {
 		pattern = "^" + pattern + "$"
 	}
-	
+
 	return pattern
 }
 
@@ -225,7 +225,7 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Cannot access directory %s: %v", watchPath, err)))
 			continue
 		}
-		
+
 		// If it's a symlink, resolve it and ensure it's a directory
 		if info.Mode()&os.ModeSymlink != 0 {
 			realPath, err := filepath.EvalSymlinks(watchPath)
@@ -240,19 +240,19 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 			}
 			watchPath = realPath
 		}
-		
+
 		if !info.IsDir() {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Path %s is not a directory, skipping", watchPath)))
 			continue
 		}
-		
+
 		// Recursively add all subdirectories to the watcher, respecting .gitignore
 		err = filepath.Walk(watchPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Error walking directory %s: %v", path, err)))
 				return nil // Continue walking despite errors
 			}
-			
+
 			// Check if this path should be ignored
 			if shouldIgnorePath(path, watchDir) {
 				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Skipping ignored path: %s", strings.TrimPrefix(path, watchDir+string(filepath.Separator)))))
@@ -261,7 +261,7 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 				}
 				return nil
 			}
-			
+
 			if info.IsDir() {
 				err = watcher.Add(path)
 				if err != nil {
@@ -273,12 +273,12 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 			}
 			return nil
 		})
-		
+
 		if err != nil {
 			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to setup recursive watching for %s: %v", watchPath, err)))
 		}
 	}
-	
+
 	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Total directories being watched: %d", dirsWatched)))
 
 	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Watching %s for changes...", watchDir)))
@@ -290,7 +290,7 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	
+
 	// Create a done channel for proper shutdown coordination
 	done := make(chan struct{})
 
@@ -315,18 +315,18 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 			if !ok {
 				return nil
 			}
-			
+
 			// Check if this file should be ignored
 			if shouldIgnorePath(event.Name, watchDir) {
 				// Silently ignore files that match ignore patterns
 				continue
 			}
-			
+
 			// Log all file events for debugging
 			fileName := filepath.Base(event.Name)
 			relativePath := strings.TrimPrefix(event.Name, watchDir+string(filepath.Separator))
 			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("File event: %s on %s (op: %s)", event.Op, relativePath, event.Op)))
-			
+
 			// Only trigger reload if the event is in an includedDir
 			inIncluded := false
 			for _, dir := range includedDirs {
@@ -335,15 +335,15 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 					break
 				}
 			}
-			
+
 			if !inIncluded {
 				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("File change ignored - %s not in watched custom node directories", relativePath)))
 				continue
 			}
-			
+
 			matched := matchesExtension(event.Name, exts)
 			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Extension check: %s matches %v = %t", fileName, exts, matched)))
-			
+
 			if (event.Op.Has(fsnotify.Write) || event.Op.Has(fsnotify.Create)) && matched {
 				if time.Since(lastRestartTime) > debounceDuration {
 					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", relativePath)))

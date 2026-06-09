@@ -101,7 +101,7 @@ func RunWithEnvConfirmation(action string, fn func(inst *ComfyInstall)) {
 		PromptReturnToMenu()
 		return
 	}
-	
+
 	if len(cfg.Installs) == 0 {
 		Log.Warning("No ComfyUI environments configured.")
 		Log.Info("Use 'Install/Reconfigure ComfyUI' to add your first environment.")
