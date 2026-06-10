@@ -169,7 +169,7 @@ func (r *CLIRouter) ShowHelp() {
 			switch {
 			case contains([]string{"start", "background", "stop", "restart", "update", "nightly", "downgrade", "status"}, cmd.Name):
 				categories["ComfyUI Management"] = append(categories["ComfyUI Management"], cmd)
-			case contains([]string{"reload", "install", "watch_nodes"}, cmd.Name):
+			case contains([]string{"reload", "install", "watch_nodes", "assets", "empty-trash"}, cmd.Name):
 				categories["Development Tools"] = append(categories["Development Tools"], cmd)
 			case contains([]string{"create-node", "list-nodes", "delete-node", "pack-node", "update-nodes"}, cmd.Name):
 				categories["Node Management"] = append(categories["Node Management"], cmd)

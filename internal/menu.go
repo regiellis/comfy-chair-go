@@ -55,6 +55,8 @@ type MenuChoices struct {
 	Status           MenuAction
 	SyncEnv          func() error
 	SetWorkingEnv    func()
+	Assets           func()
+	EmptyTrash       func()
 }
 
 // ShowMainMenu displays the main menu loop and handles navigation
@@ -226,6 +228,8 @@ func showOtherToolsMenu() string {
 			huh.NewSelect[string]().
 				Title("Other Tools").
 				Options(
+					huh.NewOption("Asset Manager (Web UI)", "assets"),
+					huh.NewOption("Empty Asset Trash", "empty_trash"),
 					huh.NewOption("Install/Upgrade pip in Environment", "upgrade_pip"),
 					huh.NewOption("Performance Monitoring", "performance"),
 					huh.NewOption("Health & Diagnostics", "health"),
@@ -242,6 +246,9 @@ func showOtherToolsMenu() string {
 		}
 		if toolChoice == "back" || toolChoice == "" {
 			return ""
+		}
+		if toolChoice == "assets" || toolChoice == "empty_trash" {
+			return toolChoice // handled by executeMenuAction (wired from main)
 		}
 		if toolChoice == "upgrade_pip" {
 			handleUpgradePip()
@@ -339,6 +346,10 @@ func executeMenuAction(choice string, choices MenuChoices, appPaths *Paths) {
 		choices.MigrateImages()
 	case "node_workflows":
 		choices.NodeWorkflows()
+	case "assets":
+		choices.Assets()
+	case "empty_trash":
+		choices.EmptyTrash()
 	case "remove_env":
 		choices.RemoveEnv()
 		os.Exit(0)

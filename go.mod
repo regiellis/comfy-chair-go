@@ -1,6 +1,6 @@
 module github.com/regiellis/comfyui-chair-go
 
-go 1.23.2
+go 1.25.0
 
 require (
 	github.com/charmbracelet/glamour v0.10.0
@@ -43,8 +43,9 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
+	golang.org/x/image v0.42.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sync v0.14.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/term v0.31.0 // indirect
-	golang.org/x/text v0.25.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 )

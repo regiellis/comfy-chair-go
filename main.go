@@ -18,10 +18,12 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,6 +31,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/joho/godotenv"
 	"github.com/regiellis/comfyui-chair-go/internal"
+	"github.com/regiellis/comfyui-chair-go/internal/assets"
 )
 
 // Configuration
@@ -1205,6 +1208,19 @@ func main() {
 		handleWatchNodesFunction,
 	)
 
+	router.RegisterCommand(&internal.Command{
+		Name:        "assets",
+		Aliases:     []string{"asset-manager"},
+		Description: "Browse/manage images, videos, and workflows across environments (web UI)",
+		Handler:     runAssetServer,
+	})
+	router.RegisterCommand(&internal.Command{
+		Name:        "empty-trash",
+		Aliases:     []string{"empty_trash"},
+		Description: "Permanently delete trashed assets (--env NAME --type output|input|workflow --yes)",
+		Handler:     runEmptyTrash,
+	})
+
 	// Route the command; unknown commands exit inside Route. If no command
 	// was given (or only global flags), fall back to the interactive menu.
 	if router.Route(os.Args) {
@@ -1237,6 +1253,8 @@ func main() {
 		Status:           func(inst *internal.ComfyInstall) { statusComfyUI(inst) },
 		SyncEnv:          syncEnvWithExample,
 		SetWorkingEnv:    func() { handleSetWorkingEnvFunction() },
+		Assets:           runAssetServer,
+		EmptyTrash:       runEmptyTrash,
 	}
 
 	// Start the main menu loop with panic recovery
@@ -2024,6 +2042,268 @@ func migrateCustomNodes() {
 	for _, r := range results {
 		fmt.Println("  " + r)
 	}
+}
+
+// parseAssetFlags extracts --host/-H and --port/-p for the assets command,
+// with COMFY_ASSETS_HOST / COMFY_ASSETS_PORT as environment fallbacks.
+// The default host is 0.0.0.0 (all interfaces); pass --host 127.0.0.1 to
+// restrict the asset manager to this machine.
+func parseAssetFlags(args []string) (host string, port int, explicitPort bool) {
+	host = os.Getenv("COMFY_ASSETS_HOST")
+	if p := os.Getenv("COMFY_ASSETS_PORT"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			port, explicitPort = v, true
+		}
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		val := ""
+		hasVal := false
+		if eq := strings.IndexByte(arg, '='); eq != -1 {
+			val, hasVal = arg[eq+1:], true
+			arg = arg[:eq]
+		}
+		next := func() string {
+			if hasVal {
+				return val
+			}
+			if i+1 < len(args) {
+				i++
+				return args[i]
+			}
+			return ""
+		}
+		switch arg {
+		case "--host", "-H":
+			host = next()
+		case "--port", "-p":
+			if v, err := strconv.Atoi(next()); err == nil && v > 0 {
+				port, explicitPort = v, true
+			}
+		}
+	}
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	return host, port, explicitPort
+}
+
+// lanIPs returns the machine's non-loopback IPv4 addresses, for printing
+// reachable URLs when the asset manager binds to all interfaces.
+func lanIPs() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLoopback() {
+			if v4 := ipn.IP.To4(); v4 != nil {
+				out = append(out, v4.String())
+			}
+		}
+	}
+	return out
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// assetEnvs maps the registered installs to asset-manager environments.
+// Returns nil (after printing guidance) when nothing is configured.
+func assetEnvs() []assets.Env {
+	cfg, err := internal.LoadGlobalConfig()
+	if err != nil || len(cfg.Installs) == 0 {
+		fmt.Println(internal.ErrorStyle.Render("No ComfyUI environments configured. Use 'Install/Reconfigure ComfyUI' first."))
+		return nil
+	}
+	envs := make([]assets.Env, 0, len(cfg.Installs))
+	for _, inst := range cfg.Installs {
+		envs = append(envs, assets.Env{Name: string(inst.Type), Path: internal.ExpandUserPath(inst.Path)})
+	}
+	return envs
+}
+
+// runAssetServer starts the asset manager web UI for all registered environments.
+// Usage: comfy-chair assets [--host 0.0.0.0] [--port 8189]
+func runAssetServer() {
+	envs := assetEnvs()
+	if envs == nil {
+		return
+	}
+
+	configDir, err := internal.GetConfigDir()
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Could not resolve config directory: %v", err)))
+		return
+	}
+	cacheDir := filepath.Join(configDir, "thumb-cache")
+
+	host, port, explicitPort := parseAssetFlags(os.Args[1:])
+	if explicitPort {
+		if !internal.IsPortAvailable(port) {
+			fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Port %d is already in use.", port)))
+			return
+		}
+	} else {
+		port = internal.GetAvailablePort(8189)
+		if port == -1 {
+			fmt.Println(internal.ErrorStyle.Render("No available port found for the asset manager."))
+			return
+		}
+	}
+
+	// 0.0.0.0/:: bind to all interfaces; show a loopback URL for the browser.
+	displayHost := host
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		displayHost = "127.0.0.1"
+	}
+	url := fmt.Sprintf("http://%s:%d", displayHost, port)
+	fmt.Println(internal.SuccessStyle.Render("Asset manager running at " + url))
+	if displayHost != host {
+		for _, ip := range lanIPs() {
+			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Also reachable at http://%s:%d", ip, port)))
+		}
+	}
+	if !isLoopbackHost(host) {
+		fmt.Println(internal.WarningStyle.Render("WARNING: the asset manager has no authentication. Anyone who can reach this address can browse, copy, and delete files in your ComfyUI environments."))
+	}
+	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Serving %d environment(s). Press Ctrl+C to stop.", len(envs))))
+	openBrowser(url)
+
+	if err := assets.NewServer(envs, cacheDir).Listen(host, port); err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Asset manager stopped: %v", err)))
+	}
+}
+
+// fmtBytes renders a byte count in human units.
+func fmtBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.0f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
+}
+
+// runEmptyTrash permanently clears the asset manager's .trash directories.
+// Usage: comfy-chair empty-trash [--env NAME] [--type output|input|workflow] [--yes]
+// Without flags it prompts for the scope interactively. "all" (or omitting
+// the flag) means every environment/type.
+func runEmptyTrash() {
+	envs := assetEnvs()
+	if envs == nil {
+		return
+	}
+
+	envName, assetType, yes, flagsGiven := "", "", false, false
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		arg, val, hasVal := args[i], "", false
+		if eq := strings.IndexByte(arg, '='); eq != -1 {
+			val, hasVal = arg[eq+1:], true
+			arg = arg[:eq]
+		}
+		next := func() string {
+			if hasVal {
+				return val
+			}
+			if i+1 < len(args) {
+				i++
+				return args[i]
+			}
+			return ""
+		}
+		switch arg {
+		case "--env", "-e":
+			envName, flagsGiven = next(), true
+		case "--type", "-t":
+			assetType, flagsGiven = next(), true
+		case "--yes", "-y":
+			yes, flagsGiven = true, true
+		}
+	}
+	if envName == "all" {
+		envName = ""
+	}
+	if assetType == "all" {
+		assetType = ""
+	}
+
+	if !flagsGiven {
+		envOptions := []huh.Option[string]{huh.NewOption("All environments", "")}
+		for _, e := range envs {
+			envOptions = append(envOptions, huh.NewOption(e.Name, e.Name))
+		}
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().Title("Empty trash for which environment?").Options(envOptions...).Value(&envName),
+			huh.NewSelect[string]().Title("Which asset type?").Options(
+				huh.NewOption("All types", ""),
+				huh.NewOption("Outputs", "output"),
+				huh.NewOption("Inputs", "input"),
+				huh.NewOption("Workflows", "workflow"),
+			).Value(&assetType),
+		)).WithTheme(huh.ThemeCharm())
+		if internal.HandleFormError(form.Run(), "Empty trash") {
+			return
+		}
+	}
+
+	files, bytes := assets.TrashStats(envs, envName, assetType)
+	if files == 0 {
+		fmt.Println(internal.InfoStyle.Render("Trash is already empty."))
+		return
+	}
+	scope := envName
+	if scope == "" {
+		scope = "all environments"
+	}
+	summary := fmt.Sprintf("%d file(s), %s in the trash of %s", files, fmtBytes(bytes), scope)
+
+	if internal.IsDryRun() {
+		internal.DryRunLog("Would permanently delete %s", summary)
+		return
+	}
+	if !yes {
+		var confirm bool
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewConfirm().
+				Title(fmt.Sprintf("Permanently delete %s?", summary)).
+				Description("This cannot be undone.").
+				Value(&confirm),
+		)).WithTheme(huh.ThemeCharm())
+		if internal.HandleFormError(form.Run(), "Empty trash") || !confirm {
+			fmt.Println(internal.InfoStyle.Render("Empty trash cancelled."))
+			return
+		}
+	}
+
+	files, bytes = assets.EmptyTrash(envs, envName, assetType)
+	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Trash emptied: freed %s (%d file(s)).", fmtBytes(bytes), files)))
+}
+
+// openBrowser opens the URL in the default browser, best effort.
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
 }
 
 // syncEnvWithExample copies missing keys from .env.example to .env, preserving existing values.
