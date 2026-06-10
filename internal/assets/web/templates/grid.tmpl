@@ -1,0 +1,24 @@
+{{define "card"}}<div class="card" data-env="{{.Env}}" data-type="{{.Type}}" data-path="{{.Path}}" data-kind="{{.Kind}}" data-name="{{.Name}}">
+  <input type="checkbox" class="check">
+  {{if .Thumbable}}<img class="thumb" loading="lazy" src="{{.ThumbURL}}" alt="" data-fallback="{{.FallbackIcon}}">{{if eq .Kind "video"}}<span class="playbadge">▶</span>{{end}}{{else}}<div class="icon">{{.FallbackIcon}}</div>{{end}}
+  <div class="meta">
+    <div class="name">{{.Path}}</div>
+    <div class="sub"><span class="badge">{{.Env}}</span><span>{{.SizeHuman}}</span><span>{{.DateHuman}}</span></div>
+  </div>
+</div>{{end}}
+
+{{define "grid"}}{{if .ShowHeader}}{{if .ShowFolderBar}}<div class="folderbar">
+  <span class="crumbs">
+    <a href="#" class="crumb" data-folder="">{{.TypeLabel}}</a>
+    {{range .Crumbs}} / <a href="#" class="crumb" data-folder="{{.Folder}}">{{.Name}}</a>{{end}}
+  </span>
+  {{range .Subfolders}}<button type="button" class="folderchip" data-folder="{{.Folder}}">📁 {{.Name}}<span class="chipdel" data-delfolder="{{.Folder}}" title="Delete folder…">✕</span></button>{{end}}
+  <button type="button" class="folderchip newfolder" id="newFolderBtn">＋ New folder</button>
+  <button type="button" class="folderchip newfolder" id="cleanFoldersBtn" title="Remove all folders that contain no files">🧹 Remove empty folders</button>
+</div>{{end}}
+<div id="gridStatus" class="gridstatus">{{.Total}} item(s){{if .Query}} matching “{{.Query}}”{{end}}</div>{{end}}
+{{range .Groups}}{{if .Label}}<h3 class="grouphead">{{.Label}}</h3>{{end}}<div class="bento">
+{{range .Items}}{{template "card" .}}{{end}}
+</div>{{end}}
+{{if not .Groups}}{{if .ShowHeader}}<div id="status">No assets found.</div>{{end}}{{end}}
+{{if .HasMore}}<div class="sentinel" hx-get="/grid?offset={{.NextOffset}}" hx-include="#filters" hx-trigger="revealed" hx-swap="outerHTML">Loading…</div>{{end}}{{end}}

@@ -19,7 +19,7 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-const thumbMaxDim = 320
+const thumbMaxDim = 448
 
 // ffmpegPath resolves ffmpeg once; empty when not installed.
 var ffmpegPath = sync.OnceValue(func() string {
@@ -31,13 +31,14 @@ var ffmpegPath = sync.OnceValue(func() string {
 })
 
 // cachePathFor builds the cache file path for an asset; the key includes the
-// file's mtime and size so edits invalidate stale thumbs.
+// file's mtime/size (so edits invalidate stale thumbs) and the thumbnail
+// dimension (so bumping thumbMaxDim regenerates them).
 func cachePathFor(cacheDir, absPath string) (string, error) {
 	info, err := os.Stat(absPath)
 	if err != nil {
 		return "", err
 	}
-	key := sha1.Sum([]byte(fmt.Sprintf("%s|%d|%d", absPath, info.ModTime().UnixNano(), info.Size())))
+	key := sha1.Sum(fmt.Appendf(nil, "%s|%d|%d|%d", absPath, info.ModTime().UnixNano(), info.Size(), thumbMaxDim))
 	return filepath.Join(cacheDir, fmt.Sprintf("%x.jpg", key)), nil
 }
 

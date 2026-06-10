@@ -1,0 +1,29 @@
+{{define "detail"}}<div id="lbMedia">
+{{if eq .Kind "image"}}<img src="{{.FileURL}}" alt="">
+{{else if eq .Kind "video"}}<video src="{{.FileURL}}" controls autoplay loop></video>
+{{else if eq .Kind "audio"}}<audio src="{{.FileURL}}" controls autoplay></audio>
+{{else}}<pre>{{.WorkflowJSON}}</pre>{{end}}
+</div>
+<aside id="lbInfo">
+  <h2>{{.Path}}</h2>
+  <div class="kv">{{.Env}} · {{.Type}} · {{.SizeHuman}}<br>{{.DateHuman}}</div>
+  <div class="actions">
+    <a href="{{.FileURL}}" download="{{.Name}}"><button class="wide">Download</button></a>
+    <div class="row">
+      <input id="renameInput" value="{{.Name}}">
+      <button id="lbRename" data-env="{{.Env}}" data-type="{{.Type}}" data-path="{{.Path}}">Rename</button>
+    </div>
+    <div class="row">
+      <select id="lbDstEnv">{{range .Envs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}</select>
+      <button id="lbCopy" data-env="{{.Env}}" data-type="{{.Type}}" data-path="{{.Path}}">Copy to env</button>
+    </div>
+    {{if .HasWorkflow}}
+    <div class="row">
+      <select id="wfDstEnv">{{range .Envs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}</select>
+      <button id="saveWf" data-env="{{.Env}}" data-type="{{.Type}}" data-path="{{.Path}}">Save workflow to env</button>
+    </div>
+    {{end}}
+  </div>
+  {{if .Prompt}}<h2 class="sect">Prompt</h2><pre>{{.Prompt}}</pre>{{end}}
+  {{if and (eq .Kind "image") (not .HasWorkflow) (not .Prompt)}}<div class="kv">No embedded ComfyUI metadata.</div>{{end}}
+</aside>{{end}}

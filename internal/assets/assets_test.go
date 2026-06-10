@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeTestPNG writes a small PNG with ComfyUI-style tEXt chunks spliced in
@@ -261,6 +263,210 @@ func TestServerEndToEnd(t *testing.T) {
 		t.Fatalf("index not served: %v status %d", err, resp2.StatusCode)
 	}
 	resp2.Body.Close()
+}
+
+func TestFolderOpsAndFilters(t *testing.T) {
+	envs := newTestEnvs(t)
+
+	// mkdir + move to folder
+	if err := makeFolder(envs, "lounge", "output", "keepers"); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveToFolder(envs, "lounge", "output", "gen_001.png", "keepers"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(envs[0].Path, "output", "keepers", "gen_001.png")); err != nil {
+		t.Fatalf("moved file missing: %v", err)
+	}
+
+	// folder-scoped scan
+	inFolder := scanFilter(envs, Filter{Env: "lounge", Type: "output", Folder: "keepers"})
+	if len(inFolder) != 1 || inFolder[0].Path != "keepers/gen_001.png" {
+		t.Fatalf("folder scan wrong: %+v", inFolder)
+	}
+
+	// subfolders listing
+	subs := subfolders(envs, Filter{Env: "lounge", Type: "output"})
+	if len(subs) != 2 { // keepers + sub
+		t.Fatalf("expected 2 subfolders, got %v", subs)
+	}
+
+	// rename
+	if err := renameAsset(envs, "lounge", "output", "keepers/gen_001.png", "hero.png"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(envs[0].Path, "output", "keepers", "hero.png")); err != nil {
+		t.Fatalf("renamed file missing: %v", err)
+	}
+	if err := renameAsset(envs, "lounge", "output", "keepers/hero.png", "../escape.png"); err == nil {
+		t.Fatal("rename with path separator should be rejected")
+	}
+
+	// date filter: everything is recent, so a future From excludes all
+	future := scanFilter(envs, Filter{Env: "lounge", From: time.Now().Add(time.Hour)})
+	if len(future) != 0 {
+		t.Fatalf("future date filter should match nothing, got %d", len(future))
+	}
+}
+
+func TestDeleteFolder(t *testing.T) {
+	envs := newTestEnvs(t)
+
+	// keep contents: sub/gen_002.png moves up to the output root
+	if err := deleteFolder(envs, "lounge", "output", "sub", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(envs[0].Path, "output", "gen_002.png")); err != nil {
+		t.Fatalf("content should have moved up: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(envs[0].Path, "output", "sub")); !os.IsNotExist(err) {
+		t.Fatal("folder should be gone")
+	}
+
+	// delete everything: folder + contents go to .trash
+	if err := makeFolder(envs, "lounge", "output", "junk"); err != nil {
+		t.Fatal(err)
+	}
+	writeTestPNG(t, filepath.Join(envs[0].Path, "output", "junk", "x.png"), false)
+	if err := deleteFolder(envs, "lounge", "output", "junk", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(envs[0].Path, "output", trashDirName, "junk", "x.png")); err != nil {
+		t.Fatalf("folder contents should be in .trash: %v", err)
+	}
+
+	// guard rails
+	if err := deleteFolder(envs, "lounge", "output", "", false); err == nil {
+		t.Fatal("deleting the root must be rejected")
+	}
+	if err := deleteFolder(envs, "lounge", "output", "../input", false); err == nil {
+		t.Fatal("traversal must be rejected")
+	}
+}
+
+func TestRemoveEmptyFolders(t *testing.T) {
+	envs := newTestEnvs(t)
+	// a/b/c is empty all the way down; "sub" contains a file and must survive.
+	if err := os.MkdirAll(filepath.Join(envs[0].Path, "output", "a", "b", "c"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// .trash must never be touched
+	if err := os.MkdirAll(filepath.Join(envs[0].Path, "output", trashDirName, "old"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	found := findEmptyFolders(envs, "lounge", "output")
+	if len(found) != 3 { // a, a/b, a/b/c
+		t.Fatalf("expected 3 empty folders, got %v", found)
+	}
+	if found[0].Folder != "a/b/c" {
+		t.Fatalf("deepest folder should come first, got %v", found)
+	}
+
+	removed := removeEmptyFolders(envs, "lounge", "output")
+	if len(removed) != 3 {
+		t.Fatalf("expected 3 removed, got %v", removed)
+	}
+	if _, err := os.Stat(filepath.Join(envs[0].Path, "output", "a")); !os.IsNotExist(err) {
+		t.Fatal("empty tree should be gone")
+	}
+	if _, err := os.Stat(filepath.Join(envs[0].Path, "output", "sub")); err != nil {
+		t.Fatal("folder with content must survive")
+	}
+	if _, err := os.Stat(filepath.Join(envs[0].Path, "output", trashDirName, "old")); err != nil {
+		t.Fatal(".trash must be untouched")
+	}
+}
+
+func TestFindDuplicates(t *testing.T) {
+	envs := newTestEnvs(t)
+	// gen_dup.png is byte-identical to sub/gen_002.png (same generator, no meta)
+	src := filepath.Join(envs[0].Path, "output", "sub", "gen_002.png")
+	dup := filepath.Join(envs[0].Path, "output", "gen_dup.png")
+	data, _ := os.ReadFile(src)
+	if err := os.WriteFile(dup, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	hc := loadHashCache(filepath.Join(t.TempDir(), "hash-cache.json"))
+	groups := findDuplicates(envs, Filter{Env: "lounge", Type: "output"}, hc)
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 dupe group, got %d", len(groups))
+	}
+	if len(groups[0].Items) != 2 {
+		t.Fatalf("expected 2 items in group, got %d", len(groups[0].Items))
+	}
+	// Second run hits the cache (no error, same result).
+	groups2 := findDuplicates(envs, Filter{Env: "lounge", Type: "output"}, hc)
+	if len(groups2) != 1 {
+		t.Fatalf("cached run differs: %d groups", len(groups2))
+	}
+}
+
+func TestHTMLViewsAndFilterBulk(t *testing.T) {
+	envs := newTestEnvs(t)
+	srv := httptest.NewServer(NewServer(envs, t.TempDir()).Handler())
+	defer srv.Close()
+
+	get := func(path string) (int, string) {
+		t.Helper()
+		r, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Body.Close()
+		var sb strings.Builder
+		if _, err := io.Copy(&sb, r.Body); err != nil {
+			t.Fatal(err)
+		}
+		return r.StatusCode, sb.String()
+	}
+
+	// Page shell
+	code, body := get("/")
+	if code != 200 || !strings.Contains(body, "htmx.min.js") || !strings.Contains(body, `id="grid"`) {
+		t.Fatalf("layout wrong: code=%d", code)
+	}
+
+	// Grid fragment with day grouping and cards
+	code, body = get("/grid?env=lounge&type=output")
+	if code != 200 || !strings.Contains(body, `class="card"`) || !strings.Contains(body, "Today") {
+		t.Fatalf("grid fragment wrong: code=%d body=%s", code, body[:min(300, len(body))])
+	}
+	if !strings.Contains(body, "folderbar") || !strings.Contains(body, "📁 sub") {
+		t.Fatal("grid should include the folder bar with the sub folder chip")
+	}
+
+	// Detail fragment
+	code, body = get("/detail?env=lounge&type=output&path=gen_001.png")
+	if code != 200 || !strings.Contains(body, "Save workflow to env") {
+		t.Fatalf("detail fragment should offer workflow extraction: code=%d", code)
+	}
+
+	// Dupes fragment (no dupes in default fixture)
+	code, body = get("/dupes?env=lounge&type=output")
+	if code != 200 || !strings.Contains(body, "No duplicates") {
+		t.Fatalf("dupes fragment wrong: code=%d", code)
+	}
+
+	// Filter-based bulk: trash everything in lounge/output via filter
+	data, _ := json.Marshal(map[string]any{"filter": map[string]string{"env": "lounge", "type": "output"}})
+	r, err := http.Post(srv.URL+"/api/delete", "application/json", bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Success bool `json:"success"`
+		Done    int  `json:"done"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&res)
+	r.Body.Close()
+	if !res.Success || res.Done != 2 {
+		t.Fatalf("filter bulk delete failed: %+v", res)
+	}
+	if left := scan(envs, "lounge", "output"); len(left) != 0 {
+		t.Fatalf("expected empty output after filter delete, got %d", len(left))
+	}
 }
 
 func TestEmptyTrash(t *testing.T) {

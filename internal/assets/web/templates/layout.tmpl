@@ -1,0 +1,84 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comfy Chair — Assets</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/vendor/htmx.min.js"></script>
+<script src="/vendor/anime.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>🪑 Comfy Chair Assets</h1>
+  <form id="filters" hx-get="/grid" hx-target="#grid" hx-swap="innerHTML"
+        hx-trigger="change, input delay:300ms from:[name=q], refresh-grid from:body"
+        onsubmit="return false">
+    <input type="hidden" name="type" id="typeInput" value="output">
+    <input type="hidden" name="folder" id="folderInput" value="">
+    <nav id="tabs">
+      <button type="button" data-type="output" class="active">Outputs</button>
+      <button type="button" data-type="input">Inputs</button>
+      <button type="button" data-type="workflow">Workflows</button>
+    </nav>
+    <div class="controls">
+      <select name="env">
+        <option value="">All environments</option>
+        {{range .Envs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+      </select>
+      <input name="q" type="search" placeholder="Filter by name…" autocomplete="off">
+      <select name="sort">
+        <option value="date">Newest first</option>
+        <option value="name">Name</option>
+        <option value="size">Largest first</option>
+      </select>
+      <span class="dateCtl" title="Date range">
+        <input name="from" type="date"> – <input name="to" type="date">
+      </span>
+      <span class="sizeCtl" title="Thumbnail size">🔍<input id="sizeRange" type="range" min="140" max="440" step="50" value="440"></span>
+      <button type="button" id="dupesBtn" hx-get="/dupes" hx-include="#filters" hx-target="#grid" hx-swap="innerHTML" title="Find byte-identical duplicates in the current scope">⧉ Dupes</button>
+      <button type="button" id="emptyTrash" class="danger" title="Permanently delete trashed items for the current tab/environment">🗑</button>
+    </div>
+  </form>
+</header>
+
+<div id="selectionBar" class="hidden">
+  <span id="selCount"></span>
+  <button id="selectAllBtn" title="Select everything matching the current filter, not just the loaded cards"></button>
+  <span class="spacer"></span>
+  <select id="dstEnv">
+    {{range .Envs}}<option value="{{.Name}}">→ {{.Name}}</option>{{end}}
+  </select>
+  <button id="copyBtn">Copy to env</button>
+  <button id="moveBtn">Move to env</button>
+  <button id="folderBtn">Move to folder…</button>
+  <button id="renameBtn">Rename…</button>
+  <button id="deleteBtn" class="danger">Delete</button>
+  <button id="clearSel">Clear</button>
+</div>
+
+<main>
+  <div id="grid" hx-get="/grid" hx-include="#filters" hx-trigger="load" hx-swap="innerHTML">
+    <div id="status">Loading…</div>
+  </div>
+</main>
+
+<div id="lightbox" class="hidden">
+  <div id="lightboxBody">
+    <button id="lbClose">✕</button>
+    <div id="lbContent"></div>
+  </div>
+</div>
+
+<div id="modal" class="hidden">
+  <div id="modalBody">
+    <h2 id="modalTitle"></h2>
+    <p id="modalMessage"></p>
+    <input id="modalInput" class="hidden" autocomplete="off">
+    <div id="modalButtons"></div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>{{end}}

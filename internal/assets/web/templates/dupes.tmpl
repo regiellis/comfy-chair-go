@@ -1,0 +1,17 @@
+{{define "dupes"}}<div id="gridStatus" class="gridstatus">
+{{if .Groups}}{{len .Groups}} duplicate group(s) — {{.Reclaimable}} reclaimable.
+  <button type="button" id="trashAllDupes" class="danger">Trash all copies (keep newest)</button>
+  <button type="button" class="backToGrid">← Back to assets</button>
+{{else}}No duplicates found in this scope. <button type="button" class="backToGrid">← Back to assets</button>{{end}}
+</div>
+{{range $gi, $g := .Groups}}<div class="dupegroup">
+  <h3 class="grouphead">{{len $g.Items}} copies · {{$g.SizeHuman}} each</h3>
+  <div class="bento dupes">
+    {{range $i, $c := $g.Items}}<div class="card dupecard{{if eq $i 0}} keeper{{end}}" data-env="{{$c.Env}}" data-type="{{$c.Type}}" data-path="{{$c.Path}}">
+      {{if eq $i 0}}<span class="keepbadge">KEEP (newest)</span>{{else}}<input type="checkbox" class="check" checked>{{end}}
+      {{if $c.Thumbable}}<img class="thumb" loading="lazy" src="{{$c.ThumbURL}}" data-fallback="{{$c.FallbackIcon}}">{{else}}<div class="icon">{{$c.FallbackIcon}}</div>{{end}}
+      <div class="meta"><div class="name">{{$c.Path}}</div>
+      <div class="sub"><span class="badge">{{$c.Env}}</span><span>{{$c.DateHuman}}</span></div></div>
+    </div>{{end}}
+  </div>
+</div>{{end}}{{end}}

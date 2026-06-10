@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,21 +17,33 @@ import (
 //go:embed web
 var webFS embed.FS
 
-// Server serves the asset manager web UI and JSON API for a set of
-// ComfyUI environments. It binds to localhost only.
+// Server serves the asset manager web UI (server-rendered htmx fragments)
+// and JSON action API for a set of ComfyUI environments.
 type Server struct {
 	envs     []Env
 	cacheDir string
+	hashes   *hashCache
 }
 
 // NewServer creates an asset manager server for the given environments.
 func NewServer(envs []Env, cacheDir string) *Server {
-	return &Server{envs: envs, cacheDir: cacheDir}
+	_ = os.MkdirAll(cacheDir, 0755)
+	return &Server{
+		envs:     envs,
+		cacheDir: cacheDir,
+		hashes:   loadHashCache(filepath.Join(cacheDir, "hash-cache.json")),
+	}
 }
 
 // Handler returns the http.Handler with all routes registered.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// HTML views (htmx fragments)
+	mux.HandleFunc("GET /{$}", s.handleHome)
+	mux.HandleFunc("GET /grid", s.handleGrid)
+	mux.HandleFunc("GET /detail", s.handleDetail)
+	mux.HandleFunc("GET /dupes", s.handleDupes)
+	// JSON API
 	mux.HandleFunc("GET /api/envs", s.handleEnvs)
 	mux.HandleFunc("GET /api/assets", s.handleList)
 	mux.HandleFunc("GET /api/thumb", s.handleThumb)
@@ -39,6 +53,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/transfer", s.handleTransfer)
 	mux.HandleFunc("POST /api/extract-workflow", s.handleExtractWorkflow)
 	mux.HandleFunc("POST /api/empty-trash", s.handleEmptyTrash)
+	mux.HandleFunc("POST /api/rename", s.handleRename)
+	mux.HandleFunc("POST /api/mkdir", s.handleMkdir)
+	mux.HandleFunc("POST /api/move-folder", s.handleMoveFolder)
+	mux.HandleFunc("POST /api/delete-folder", s.handleDeleteFolder)
+	mux.HandleFunc("POST /api/clean-folders", s.handleCleanFolders)
 
 	web, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServerFS(web))
@@ -130,6 +149,123 @@ func (s *Server) handleThumb(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, thumb)
 }
 
+func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
+	req, err := s.decodeBatch(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Name == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("name is required"))
+		return
+	}
+	it := req.Items[0]
+	if err := renameAsset(s.envs, it.Env, it.Type, it.Path, req.Name); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (s *Server) handleMkdir(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Env    string `json:"env"`
+		Type   string `json:"type"`
+		Folder string `json:"folder"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Folder == "" || req.Type == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("env, type, and folder are required"))
+		return
+	}
+	if req.Env == "" {
+		// "All environments" view: create the folder in every env.
+		var errs []string
+		for _, e := range s.envs {
+			if err := makeFolder(s.envs, e.Name, req.Type, req.Folder); err != nil {
+				errs = append(errs, err.Error())
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": len(errs) == 0, "errors": errs})
+		return
+	}
+	if err := makeFolder(s.envs, req.Env, req.Type, req.Folder); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (s *Server) handleMoveFolder(w http.ResponseWriter, r *http.Request) {
+	req, err := s.decodeBatch(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	batchResult(w, req.Items, func(it itemRef) error {
+		return moveToFolder(s.envs, it.Env, it.Type, it.Path, req.Folder)
+	})
+}
+
+func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Env          string `json:"env"`
+		Type         string `json:"type"`
+		Folder       string `json:"folder"`
+		KeepContents bool   `json:"keep_contents"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Folder == "" || req.Type == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("type and folder are required"))
+		return
+	}
+	targets := []string{req.Env}
+	if req.Env == "" {
+		// "All environments" view: delete the folder wherever it exists.
+		targets = targets[:0]
+		for _, e := range s.envs {
+			if abs, err := resolveAssetPath(s.envs, e.Name, req.Type, req.Folder); err == nil {
+				if info, err := os.Stat(abs); err == nil && info.IsDir() {
+					targets = append(targets, e.Name)
+				}
+			}
+		}
+		if len(targets) == 0 {
+			writeErr(w, http.StatusNotFound, fmt.Errorf("folder %s not found in any environment", req.Folder))
+			return
+		}
+	}
+	var errs []string
+	for _, env := range targets {
+		if err := deleteFolder(s.envs, env, req.Type, req.Folder, req.KeepContents); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", env, err))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": len(errs) == 0, "errors": errs})
+}
+
+// handleCleanFolders removes empty folders in scope. With dry=true it only
+// reports what would be removed, so the UI can confirm with a real count.
+func (s *Server) handleCleanFolders(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Env  string `json:"env"`
+		Type string `json:"type"`
+		Dry  bool   `json:"dry"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	var folders []folderRef
+	if req.Dry {
+		folders = findEmptyFolders(s.envs, req.Env, req.Type)
+	} else {
+		folders = removeEmptyFolders(s.envs, req.Env, req.Type)
+	}
+	if folders == nil {
+		folders = []folderRef{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "folders": folders})
+}
+
 func (s *Server) handleEmptyTrash(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Env  string `json:"env"`
@@ -173,20 +309,54 @@ type itemRef struct {
 	Path string `json:"path"`
 }
 
-type batchRequest struct {
-	Items  []itemRef `json:"items"`
-	DstEnv string    `json:"dst_env"`
-	Move   bool      `json:"move"`
-	Name   string    `json:"name"`
+// filterRef mirrors the filter form fields for "act on everything matching".
+type filterRef struct {
+	Env    string `json:"env"`
+	Type   string `json:"type"`
+	Query  string `json:"q"`
+	Folder string `json:"folder"`
+	From   string `json:"from"`
+	To     string `json:"to"`
 }
 
-func decodeBatch(r *http.Request) (batchRequest, error) {
+func (fr *filterRef) toFilter() Filter {
+	v := url.Values{}
+	v.Set("env", fr.Env)
+	v.Set("type", fr.Type)
+	v.Set("q", fr.Query)
+	v.Set("folder", fr.Folder)
+	v.Set("from", fr.From)
+	v.Set("to", fr.To)
+	return parseFilter(v)
+}
+
+type batchRequest struct {
+	Items  []itemRef  `json:"items"`
+	Filter *filterRef `json:"filter"`
+	DstEnv string     `json:"dst_env"`
+	Move   bool       `json:"move"`
+	Name   string     `json:"name"`
+	Folder string     `json:"folder"`
+}
+
+// decodeBatch parses a batch action; when a filter is given instead of items,
+// it resolves to every matching asset so bulk actions cover the full result
+// set, not just the cards loaded in the browser.
+func (s *Server) decodeBatch(r *http.Request) (batchRequest, error) {
 	var req batchRequest
 	err := json.NewDecoder(r.Body).Decode(&req)
-	if err == nil && len(req.Items) == 0 {
-		err = fmt.Errorf("no items provided")
+	if err != nil {
+		return req, err
 	}
-	return req, err
+	if len(req.Items) == 0 && req.Filter != nil {
+		for _, a := range scanFilter(s.envs, req.Filter.toFilter()) {
+			req.Items = append(req.Items, itemRef{Env: a.Env, Type: a.Type, Path: a.Path})
+		}
+	}
+	if len(req.Items) == 0 {
+		return req, fmt.Errorf("no items matched")
+	}
+	return req, nil
 }
 
 // batchResult applies fn to every item and reports per-item errors.
@@ -204,7 +374,7 @@ func batchResult(w http.ResponseWriter, items []itemRef, fn func(itemRef) error)
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeBatch(r)
+	req, err := s.decodeBatch(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -215,7 +385,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTransfer(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeBatch(r)
+	req, err := s.decodeBatch(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -230,7 +400,7 @@ func (s *Server) handleTransfer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleExtractWorkflow(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeBatch(r)
+	req, err := s.decodeBatch(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
