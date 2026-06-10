@@ -19,11 +19,12 @@
             "onnxruntime>=1.15.0"
         ]
     },
-    "comfy_version": ">=0.2.0",
+    "comfy_version": ">=0.10.0",
     "tags": [
         "custom-node",
         "model-loader",
         "ml",
-        "inference"
+        "inference",
+        "v3"
     ]
 }

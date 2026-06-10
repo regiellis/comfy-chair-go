@@ -12,9 +12,10 @@
         "python": ">=3.10",
         "requirements": "requirements.txt"
     },
-    "comfy_version": ">=0.2.0",
+    "comfy_version": ">=0.10.0",
     "tags": [
         "custom-node",
-        "basic"
+        "basic",
+        "v3"
     ]
 }

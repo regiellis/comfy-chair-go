@@ -1,8 +1,7 @@
 import uuid, threading, time
 from aiohttp import web
-from .nodes import NODE_CLASS_MAPPINGS
+from .nodes.{{NodeNameLower}} import generate
 
-ENGINE = list(NODE_CLASS_MAPPINGS.values())[0]() if NODE_CLASS_MAPPINGS else None
 routes = web.RouteTableDef()
 BATCH = {}
 
@@ -28,8 +27,10 @@ async def generate(request: web.Request):
     if not topic:
         return web.json_response({'success': False, 'error': 'topic required'}, status=400)
     try:
-        result = ENGINE.run(topic)[0] if ENGINE else 'no-engine'
+        result = generate(topic)
         return web.json_response({'success': True, 'result': result})
+    except ValueError as ve:
+        return web.json_response({'success': False, 'error': str(ve)}, status=400)
     except Exception as e:  # pragma: no cover
         return web.json_response({'success': False, 'error': str(e)}, status=500)
 
@@ -37,8 +38,7 @@ async def generate(request: web.Request):
 async def health(_):
     ok, err = True, None
     try:
-        if not ENGINE:
-            raise RuntimeError('engine missing')
+        generate('healthcheck')
     except Exception as e:
         ok, err = False, str(e)
     return web.json_response({'ok': ok, 'error': err})
@@ -65,7 +65,7 @@ def _run_batch(job_id, topics):
             job['status'] = 'cancelled'
             return
         try:
-            res = ENGINE.run(t)[0] if ENGINE else f'no-engine-{t}'
+            res = generate(t)
         except Exception as e:  # pragma: no cover
             res = f'error:{e}'
         job['results'].append(res)

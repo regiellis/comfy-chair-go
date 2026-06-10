@@ -17,11 +17,12 @@
             "torch>=2.0.0"
         ]
     },
-    "comfy_version": ">=0.2.0",
+    "comfy_version": ">=0.10.0",
     "tags": [
         "custom-node",
         "api",
         "integration",
-        "http"
+        "http",
+        "v3"
     ]
 }

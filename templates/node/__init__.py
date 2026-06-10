@@ -1,15 +1,19 @@
-import os
+"""{{NodeName}} - ComfyUI custom node package (V3 schema).
+
+Author: {{Author}}
+"""
+
+from comfy_api.latest import ComfyExtension, IO
 
 from .src.{{NodeNameLower}} import {{NodeName}}
 
-WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "js")
-CSS_DIRECTORY = os.path.join(os.path.dirname(__file__), "css")
+WEB_DIRECTORY = "./js"
 
-NODE_CLASS_MAPPINGS = {
-    "{{NodeName}}": {{NodeName}},
-}
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "{{NodeName}}": "{{NodeName}}",
-}
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY", "CSS_DIRECTORY"]
+class {{NodeName}}Extension(ComfyExtension):
+    async def get_node_list(self) -> list[type[IO.ComfyNode]]:
+        return [{{NodeName}}]
+
+
+async def comfy_entrypoint() -> {{NodeName}}Extension:
+    return {{NodeName}}Extension()

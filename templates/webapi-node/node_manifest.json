@@ -15,11 +15,12 @@
             "aiohttp>=3.8.0"
         ]
     },
-    "comfy_version": ">=0.2.0",
+    "comfy_version": ">=0.10.0",
     "tags": [
         "custom-node",
         "web-api",
         "floating-panel",
-        "http-endpoints"
+        "http-endpoints",
+        "v3"
     ]
 }

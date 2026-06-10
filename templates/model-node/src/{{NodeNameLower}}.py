@@ -1,434 +1,74 @@
-"""
-{{NodeName}} - Model Loading ComfyUI node
-{{NodeDescription}}
+"""{{NodeName}} - Model loader ComfyUI node (V3 schema).
 
-This node is designed for loading and managing ML models with caching and optimization.
+{{NodeDesc}}
+
+Loads a model file from a ComfyUI models folder, following the same pattern
+as the built-in loaders (see comfy_extras/nodes_upscale_model.py). The model
+dropdown is populated from the folder via folder_paths.
 
 Author: {{Author}}
 """
 
-import torch
 import os
-import hashlib
-from typing import Dict, Any, Tuple, Optional, Union
-from pathlib import Path
-import json
+
+import comfy.utils
+import folder_paths
+
+from comfy_api.latest import IO
+
+# The models subfolder to load from (a key registered in folder_paths).
+# Built-in keys include "checkpoints", "loras", "vae", "upscale_models", ...
+# To use a custom folder, register it once at import time, e.g.:
+#   folder_paths.add_model_folder_path("{{NodeNameLower}}", os.path.join(folder_paths.models_dir, "{{NodeNameLower}}"))
+MODEL_FOLDER = "checkpoints"
 
 
-class {{NodeName}}:
-    """
-    Model loading ComfyUI node with advanced caching and optimization.
-    
-    Features:
-    - Model caching and management
-    - Memory optimization
-    - Multiple model format support
-    - Model validation
-    - Performance monitoring
-    """
-    
-    RETURN_TYPES = ("MODEL", "STRING", "DICT")
-    RETURN_NAMES = ("model", "model_info", "metadata")
-    FUNCTION = "load_model"
-    CATEGORY = "{{NodeName}}/models"
-    
-    def __init__(self):
-        self.model_cache = {}
-        self.model_metadata = {}
-        
-    @classmethod
-    def INPUT_TYPES(cls) -> Dict[str, Any]:
-        return {
-            "required": {
-                "model_path": ("STRING", {
-                    "default": "",
-                    "tooltip": "Path to the model file"
-                }),
-                "model_type": (["auto", "safetensors", "checkpoint", "diffusers", "onnx"], {
-                    "default": "auto",
-                    "tooltip": "Model format type"
-                }),
-                "device": (["auto", "cpu", "cuda", "mps"], {
-                    "default": "auto",
-                    "tooltip": "Target device for model"
-                }),
-                "precision": (["auto", "float32", "float16", "bfloat16"], {
-                    "default": "auto",
-                    "tooltip": "Model precision"
-                }),
-            },
-            "optional": {
-                "cache_enabled": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Enable model caching"
-                }),
-                "optimize_memory": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Enable memory optimizations"
-                }),
-                "model_config": ("STRING", {
-                    "default": "{}",
-                    "multiline": True,
-                    "tooltip": "Model configuration in JSON format"
-                }),
-                "force_reload": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Force reload even if cached"
-                }),
-            }
-        }
-    
-    def load_model(self,
-                   model_path: str,
-                   model_type: str,
-                   device: str,
-                   precision: str,
-                   cache_enabled: bool = True,
-                   optimize_memory: bool = True,
-                   model_config: str = "{}",
-                   force_reload: bool = False) -> Tuple[Any, str, Dict]:
-        """
-        Load a model with advanced caching and optimization.
-        
-        Args:
-            model_path: Path to model file
-            model_type: Model format type
-            device: Target device
-            precision: Model precision
-            cache_enabled: Enable caching
-            optimize_memory: Enable memory optimization
-            model_config: Additional model configuration
-            force_reload: Force reload from disk
-            
-        Returns:
-            Tuple of (model, model_info, metadata)
-        """
-        try:
-            # Validate model path
-            if not model_path or not os.path.exists(model_path):
-                return (None, f"Model file not found: {model_path}", {"error": "file_not_found"})
-            
-            # Generate cache key
-            cache_key = self._generate_cache_key(model_path, device, precision, model_config)
-            
-            # Check cache
-            if cache_enabled and not force_reload and cache_key in self.model_cache:
-                cached_model = self.model_cache[cache_key]
-                metadata = self.model_metadata.get(cache_key, {})
-                return (cached_model, "Model loaded from cache", metadata)
-            
-            # Parse model configuration
-            try:
-                config = json.loads(model_config) if model_config else {}
-            except json.JSONDecodeError:
-                config = {}
-            
-            # Determine device
-            target_device = self._determine_device(device)
-            
-            # Determine precision
-            target_dtype = self._determine_precision(precision)
-            
-            # Auto-detect model type if needed
-            if model_type == "auto":
-                model_type = self._detect_model_type(model_path)
-            
-            # Load model based on type
-            model, model_info = self._load_model_by_type(
-                model_path, model_type, target_device, target_dtype, config
-            )
-            
-            # Apply memory optimizations
-            if optimize_memory and model is not None:
-                model = self._apply_memory_optimizations(model, target_device)
-            
-            # Generate metadata
-            metadata = self._generate_metadata(model_path, model_type, target_device, target_dtype)
-            
-            # Cache the model
-            if cache_enabled and model is not None:
-                self.model_cache[cache_key] = model
-                self.model_metadata[cache_key] = metadata
-            
-            return (model, model_info, metadata)
-            
-        except Exception as e:
-            error_msg = f"Failed to load model: {str(e)}"
-            return (None, error_msg, {"error": str(e), "success": False})
-    
-    def _generate_cache_key(self, model_path: str, device: str, precision: str, config: str) -> str:
-        """Generate a unique cache key for the model configuration."""
-        content = f"{model_path}:{device}:{precision}:{config}"
-        return hashlib.md5(content.encode()).hexdigest()
-    
-    def _determine_device(self, device: str) -> str:
-        """Determine the best device for the model."""
-        if device == "auto":
-            if torch.cuda.is_available():
-                return "cuda"
-            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                return "mps"
-            else:
-                return "cpu"
-        return device
-    
-    def _determine_precision(self, precision: str) -> torch.dtype:
-        """Determine the appropriate dtype for the model."""
-        if precision == "auto":
-            return torch.float16 if torch.cuda.is_available() else torch.float32
-        elif precision == "float16":
-            return torch.float16
-        elif precision == "bfloat16":
-            return torch.bfloat16
-        else:
-            return torch.float32
-    
-    def _detect_model_type(self, model_path: str) -> str:
-        """Auto-detect model type from file extension and structure."""
-        path = Path(model_path)
-        
-        if path.suffix == ".safetensors":
-            return "safetensors"
-        elif path.suffix in [".ckpt", ".pth", ".pt"]:
-            return "checkpoint"
-        elif path.suffix == ".onnx":
-            return "onnx"
-        elif path.is_dir():
-            # Check for diffusers structure
-            if (path / "model_index.json").exists():
-                return "diffusers"
-        
-        return "checkpoint"  # Default fallback
-    
-    def _load_model_by_type(self, 
-                           model_path: str, 
-                           model_type: str, 
-                           device: str, 
-                           dtype: torch.dtype,
-                           config: Dict) -> Tuple[Any, str]:
-        """Load model based on its type."""
-        
-        if model_type == "safetensors":
-            return self._load_safetensors(model_path, device, dtype)
-        elif model_type == "checkpoint":
-            return self._load_checkpoint(model_path, device, dtype)
-        elif model_type == "diffusers":
-            return self._load_diffusers(model_path, device, dtype, config)
-        elif model_type == "onnx":
-            return self._load_onnx(model_path, config)
-        else:
-            raise ValueError(f"Unsupported model type: {model_type}")
-    
-    def _load_safetensors(self, model_path: str, device: str, dtype: torch.dtype) -> Tuple[Any, str]:
-        """Load SafeTensors model."""
-        try:
-            from safetensors.torch import load_file
-            model_dict = load_file(model_path, device=device)
-            model_info = f"SafeTensors model loaded: {len(model_dict)} tensors"
-            return (model_dict, model_info)
-        except ImportError:
-            raise ImportError("safetensors package not installed")
-    
-    def _load_checkpoint(self, model_path: str, device: str, dtype: torch.dtype) -> Tuple[Any, str]:
-        """Load PyTorch checkpoint."""
-        model_dict = torch.load(model_path, map_location=device)
-        
-        # Convert to target dtype
-        if isinstance(model_dict, dict):
-            for key, tensor in model_dict.items():
-                if isinstance(tensor, torch.Tensor):
-                    model_dict[key] = tensor.to(dtype=dtype)
-        
-        model_info = f"Checkpoint loaded with {len(model_dict)} keys"
-        return (model_dict, model_info)
-    
-    def _load_diffusers(self, model_path: str, device: str, dtype: torch.dtype, config: Dict) -> Tuple[Any, str]:
-        """Load Diffusers model."""
-        try:
-            from diffusers import DiffusionPipeline
-            pipeline = DiffusionPipeline.from_pretrained(
-                model_path,
-                torch_dtype=dtype,
-                device_map=device,
-                **config
-            )
-            model_info = f"Diffusers pipeline loaded: {type(pipeline).__name__}"
-            return (pipeline, model_info)
-        except ImportError:
-            raise ImportError("diffusers package not installed")
-    
-    def _load_onnx(self, model_path: str, config: Dict) -> Tuple[Any, str]:
-        """Load ONNX model."""
-        try:
-            import onnxruntime as ort
-            session = ort.InferenceSession(model_path, **config)
-            model_info = f"ONNX model loaded with {len(session.get_inputs())} inputs"
-            return (session, model_info)
-        except ImportError:
-            raise ImportError("onnxruntime package not installed")
-    
-    def _apply_memory_optimizations(self, model: Any, device: str) -> Any:
-        """Apply memory optimizations to the model."""
-        try:
-            if hasattr(model, 'eval'):
-                model.eval()
-            
-            if device == "cuda" and hasattr(model, 'half'):
-                model = model.half()
-            
-            if hasattr(torch.backends.cudnn, 'benchmark'):
-                torch.backends.cudnn.benchmark = True
-                
-        except Exception as e:
-            print(f"Memory optimization warning: {e}")
-        
-        return model
-    
-    def _generate_metadata(self, model_path: str, model_type: str, device: str, dtype: torch.dtype) -> Dict[str, Any]:
-        """Generate comprehensive metadata for the loaded model."""
-        metadata = {
-            "model_path": model_path,
-            "model_type": model_type,
-            "device": device,
-            "dtype": str(dtype),
-            "file_size_mb": os.path.getsize(model_path) / (1024 * 1024),
-            "load_timestamp": torch.tensor([0.0]),  # Placeholder
-            "success": True,
-        }
-
-        # Add device-specific information
-        if device == "cuda":
-            metadata["cuda_memory_allocated"] = torch.cuda.memory_allocated() / (1024**3)  # GB
-            metadata["cuda_memory_reserved"] = torch.cuda.memory_reserved() / (1024**3)   # GB
-
-        return metadata
+class {{NodeName}}(IO.ComfyNode):
+    """Load a model file and hand its state dict to downstream nodes."""
 
     @classmethod
-    def IS_CHANGED(cls, model_path, model_type, device, precision,
-                   cache_enabled=True, optimize_memory=True, model_config="{}",
-                   force_reload=False):
-        """
-        Determines if the node needs re-execution based on input changes.
-
-        For model loading nodes, consider:
-        - Model file modification time (detect file updates)
-        - Model path and configuration changes
-        - Force reload flag to bypass caching
-
-        Return options:
-        - float('nan'): Always reload the model
-        - Hash including file mtime: Reload when file changes
-        - Hash of config only: Reload only when config changes
-
-        Example customizations:
-            # Include file hash for strict model verification:
-            import hashlib
-            with open(model_path, 'rb') as f:
-                file_hash = hashlib.md5(f.read()).hexdigest()
-            return hash((file_hash, device, precision))
-        """
-        # Force reload bypasses all caching
-        if force_reload:
-            return float('nan')
-
-        # Include file modification time to detect model updates
-        try:
-            if model_path and os.path.exists(model_path):
-                mtime = os.path.getmtime(model_path)
-            else:
-                mtime = None
-        except OSError:
-            mtime = None
-
-        # Hash based on model path, mtime, and configuration
-        return hash((model_path, mtime, model_type, device, precision,
-                     cache_enabled, optimize_memory, model_config))
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="{{NodeName}}",
+            display_name="{{NodeName}} (Model Loader)",
+            category="custom/loaders",
+            description="{{NodeDesc}}",
+            inputs=[
+                IO.Combo.Input(
+                    "model_name",
+                    options=folder_paths.get_filename_list(MODEL_FOLDER),
+                    tooltip=f"Model file from the models/{MODEL_FOLDER} folder.",
+                ),
+            ],
+            outputs=[
+                # A custom type keeps the wire type explicit; downstream nodes
+                # accept it with IO.Custom("{{NodeName}}_MODEL").Input(...).
+                IO.Custom("{{NodeName}}_MODEL").Output("model"),
+                IO.String.Output("model_info"),
+            ],
+        )
 
     @classmethod
-    def VALIDATE_INPUTS(cls, model_path, model_type, device, precision,
-                        cache_enabled=True, optimize_memory=True, model_config="{}",
-                        force_reload=False):
-        """
-        Validates inputs before the node executes.
+    def execute(cls, model_name) -> IO.NodeOutput:
+        model_path = folder_paths.get_full_path_or_raise(MODEL_FOLDER, model_name)
 
-        For model loading nodes, validate:
-        - Model file exists and is readable
-        - Model file has valid extension for the type
-        - Device is available (CUDA, MPS)
-        - JSON configuration format
+        # safe_load handles .safetensors and torch checkpoints safely.
+        state_dict = comfy.utils.load_torch_file(model_path, safe_load=True)
 
-        Return values:
-        - True: All inputs are valid
-        - String: Error message describing the validation failure
+        # Replace this with your model construction, e.g. wrap the state dict
+        # in your architecture class, .eval() it, and move it to the right
+        # device with comfy.model_management.get_torch_device().
+        model = state_dict
 
-        Example customizations:
-            # Validate minimum file size:
-            if os.path.getsize(model_path) < 1000:
-                return "Model file appears to be empty or corrupted"
+        size_mb = os.path.getsize(model_path) / (1024 * 1024)
+        model_info = f"Loaded {model_name}: {len(state_dict)} tensors, {size_mb:.1f} MB"
+        return IO.NodeOutput(model, model_info)
 
-            # Check for specific model architectures:
-            if "sd_xl" in model_path.lower() and device == "cpu":
-                return "SDXL models require GPU acceleration"
-        """
-        # Validate model path exists
-        if not model_path:
-            return "model_path is required"
-
-        if not os.path.exists(model_path):
-            return f"Model file not found: {model_path}"
-
-        # Check if path is a file or directory (diffusers can be directories)
-        path = Path(model_path)
-        if path.is_dir():
-            # For directories, check if it's a valid diffusers model
-            if not (path / "model_index.json").exists():
-                # Could be another valid format, just warn
-                pass
-        else:
-            # For files, check if readable
-            if not os.access(model_path, os.R_OK):
-                return f"Model file is not readable: {model_path}"
-
-            # Validate file extension matches model_type
-            valid_extensions = {
-                "safetensors": [".safetensors"],
-                "checkpoint": [".ckpt", ".pth", ".pt", ".bin"],
-                "onnx": [".onnx"],
-                "auto": [".safetensors", ".ckpt", ".pth", ".pt", ".bin", ".onnx"],
-            }
-
-            if model_type in valid_extensions:
-                allowed = valid_extensions[model_type]
-                if path.suffix.lower() not in allowed:
-                    return f"File extension '{path.suffix}' not valid for model_type '{model_type}'. Expected: {allowed}"
-
-        # Validate device availability
-        if device == "cuda" and not torch.cuda.is_available():
-            return "CUDA device requested but not available"
-
-        if device == "mps":
-            if not hasattr(torch.backends, 'mps') or not torch.backends.mps.is_available():
-                return "MPS device requested but not available"
-
-        # Validate model_config JSON format
-        if model_config:
-            try:
-                import json
-                parsed_config = json.loads(model_config)
-                if not isinstance(parsed_config, dict):
-                    return "model_config must be a JSON object (dict)"
-            except json.JSONDecodeError as e:
-                return f"Invalid model_config JSON format: {str(e)}"
-
-        # All validations passed
-        return True
-
-
-# Node Registration
-NODE_CLASS_MAPPINGS = {
-    "{{NodeName}}": {{NodeName}}
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "{{NodeName}}": "{{DisplayName}} (Model Loader)"
-}
+    @classmethod
+    def fingerprint_inputs(cls, model_name):
+        """Re-load when the file on disk changes, not just when the name does."""
+        try:
+            model_path = folder_paths.get_full_path_or_raise(MODEL_FOLDER, model_name)
+            return f"{model_name}:{os.path.getmtime(model_path)}"
+        except Exception:
+            return float("nan")

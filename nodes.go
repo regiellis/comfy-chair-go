@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 )
 
@@ -30,20 +29,14 @@ var nodeTemplateFS embed.FS
 // placeholderRegex for efficient placeholder removal
 var placeholderRegex = regexp.MustCompile(`\{\{[^}]*\}\}`)
 
-// Enhanced replacePlaceholders: removes unreplaced vars and ensures quoted strings for Python/JS
+// replacePlaceholders substitutes template values and strips any placeholders
+// that remain (e.g. ones with empty values).
 func replacePlaceholders(content string, values map[string]string) string {
-	// Apply replacements first
 	for k, v := range values {
 		if v != "" {
-			if (strings.HasPrefix(k, "{{") && strings.HasSuffix(k, "}}")) && (strings.Contains(content, "\""+k+"\"")) {
-				v = strconv.Quote(v)
-				content = strings.ReplaceAll(content, "\""+k+"\"", v)
-			} else {
-				content = strings.ReplaceAll(content, k, v)
-			}
+			content = strings.ReplaceAll(content, k, v)
 		}
 	}
-	// Remove remaining placeholders in one pass using regex
 	return placeholderRegex.ReplaceAllString(content, "")
 }
 

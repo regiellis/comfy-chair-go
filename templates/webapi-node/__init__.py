@@ -1,11 +1,17 @@
-import os
+"""{{NodeName}} - Web/API ComfyUI node package (V3 schema).
 
-from .nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+Registers the node via the V3 extension entrypoint and bootstraps the aiohttp
+routes on the running ComfyUI server. The API layer failing never breaks node
+registration.
 
-WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "web")
-CSS_DIRECTORY = os.path.join(os.path.dirname(__file__), "css")
+Author: {{Author}}
+"""
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY", "CSS_DIRECTORY"]
+from comfy_api.latest import ComfyExtension, IO
+
+from .nodes.{{NodeNameLower}} import {{NodeName}}
+
+WEB_DIRECTORY = "./web"
 
 try:
     from . import api  # noqa: F401
@@ -15,3 +21,12 @@ except ImportError:
     pass  # Server not available (offline tooling)
 except Exception as e:  # pragma: no cover
     print(f"Warning: Could not setup API routes: {e}")
+
+
+class {{NodeName}}Extension(ComfyExtension):
+    async def get_node_list(self) -> list[type[IO.ComfyNode]]:
+        return [{{NodeName}}]
+
+
+async def comfy_entrypoint() -> {{NodeName}}Extension:
+    return {{NodeName}}Extension()

@@ -56,7 +56,7 @@ Only venvs named exactly **`venv`** or **`.venv`** inside the ComfyUI dir are re
 
 ### Node scaffolding
 
-`create-node` copies a template tree from **`templates/`** (`node`, `advanced-node`, `api-node`, `model-node`, `webapi-node`) and substitutes placeholders defined in `internal/constants.go`: `{{NodeName}}`, `{{NodeNameLower}}`, `{{NodeDesc}}`, `{{Author}}`, `{{PubID}}` (the latter two from `.env`). Filenames themselves contain placeholders (e.g. `{{NodeNameLower}}.py`) and are renamed during copy.
+`create-node` copies a template tree from **`templates/`** (`node`, `advanced-node`, `api-node`, `model-node`, `webapi-node`) and substitutes placeholders defined in `internal/constants.go`: `{{NodeName}}`, `{{NodeNameLower}}`, `{{NodeDesc}}`, `{{Author}}`, `{{PubID}}` (the latter two from `.env`). Filenames themselves contain placeholders (e.g. `{{NodeNameLower}}.py`) and are renamed during copy. Templates target the **ComfyUI V3 node schema** (`comfy_api.latest`: `IO.ComfyNode` subclasses with `define_schema()`/classmethod `execute()`, registered via a `ComfyExtension` + `comfy_entrypoint()`), which requires ComfyUI >= 0.10.0. Templates are embedded via `go:embed` — **rebuild the binary after editing them**.
 
 ### Reload
 

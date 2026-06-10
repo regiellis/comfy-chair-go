@@ -18,11 +18,12 @@
             "pillow>=9.0.0"
         ]
     },
-    "comfy_version": ">=0.2.0",
+    "comfy_version": ">=0.10.0",
     "tags": [
         "custom-node",
         "advanced",
         "ui-components",
-        "settings"
+        "settings",
+        "v3"
     ]
 }

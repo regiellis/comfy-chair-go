@@ -1,19 +1,17 @@
-"""
-{{NodeName}} - Model Loading ComfyUI Node Package
-
-This package provides model loading and management functionality for ComfyUI nodes.
+"""{{NodeName}} - Model loader ComfyUI node package (V3 schema).
 
 Author: {{Author}}
 """
 
+from comfy_api.latest import ComfyExtension, IO
+
 from .src.{{NodeNameLower}} import {{NodeName}}
 
-NODE_CLASS_MAPPINGS = {
-    "{{NodeName}}": {{NodeName}}
-}
 
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "{{NodeName}}": "{{DisplayName}} (Model Loader)"
-}
+class {{NodeName}}Extension(ComfyExtension):
+    async def get_node_list(self) -> list[type[IO.ComfyNode]]:
+        return [{{NodeName}}]
 
-__all__ = ["{{NodeName}}"]
+
+async def comfy_entrypoint() -> {{NodeName}}Extension:
+    return {{NodeName}}Extension()

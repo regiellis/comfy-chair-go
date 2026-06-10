@@ -1,19 +1,19 @@
-"""
-{{NodeName}} - Advanced ComfyUI Node Package
-
-This package provides advanced functionality for ComfyUI nodes.
+"""{{NodeName}} - Advanced ComfyUI node package (V3 schema).
 
 Author: {{Author}}
 """
 
+from comfy_api.latest import ComfyExtension, IO
+
 from .src.{{NodeNameLower}} import {{NodeName}}
 
-NODE_CLASS_MAPPINGS = {
-    "{{NodeName}}": {{NodeName}}
-}
+WEB_DIRECTORY = "./js"
 
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "{{NodeName}}": "{{DisplayName}} (Advanced)"
-}
 
-__all__ = ["{{NodeName}}"]
+class {{NodeName}}Extension(ComfyExtension):
+    async def get_node_list(self) -> list[type[IO.ComfyNode]]:
+        return [{{NodeName}}]
+
+
+async def comfy_entrypoint() -> {{NodeName}}Extension:
+    return {{NodeName}}Extension()

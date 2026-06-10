@@ -1,19 +1,17 @@
-"""
-{{NodeName}} - API-focused ComfyUI Node Package
-
-This package provides API integration functionality for ComfyUI nodes.
+"""{{NodeName}} - API-focused ComfyUI node package (V3 schema).
 
 Author: {{Author}}
 """
 
+from comfy_api.latest import ComfyExtension, IO
+
 from .src.{{NodeNameLower}} import {{NodeName}}
 
-NODE_CLASS_MAPPINGS = {
-    "{{NodeName}}": {{NodeName}}
-}
 
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "{{NodeName}}": "{{DisplayName}} (API)"
-}
+class {{NodeName}}Extension(ComfyExtension):
+    async def get_node_list(self) -> list[type[IO.ComfyNode]]:
+        return [{{NodeName}}]
 
-__all__ = ["{{NodeName}}"]
+
+async def comfy_entrypoint() -> {{NodeName}}Extension:
+    return {{NodeName}}Extension()

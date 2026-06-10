@@ -1,85 +1,51 @@
-class {{NodeName}}:
-    """Core logic for {{NodeName}} node.
+"""{{NodeName}} - core logic and V3 node definition.
 
-    Extend methods or add helpers as needed.
+The business logic lives in plain functions (the "engine") so the aiohttp API
+layer in api.py and the graph node share one implementation.
+
+Author: {{Author}}
+"""
+
+from comfy_api.latest import IO
+
+
+def generate(topic: str) -> str:
+    """Engine: produce a result for the given topic.
+
+    Replace this with your real logic; both the node and the HTTP endpoints
+    call it.
     """
+    if not topic or not topic.strip():
+        raise ValueError("topic required")
+    return f"Generated for {topic}"
+
+
+class {{NodeName}}(IO.ComfyNode):
+    """Graph-facing wrapper around the engine."""
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "topic": ("STRING", {"default": "demo", "multiline": False}),
-            },
-        }
-
-    RETURN_TYPES = ("STRING",)
-    FUNCTION = "run"
-    CATEGORY = "custom"
-    DISPLAY_NAME = "{{NodeName}}"
-
-    def run(self, topic: str):
-        return (f"Generated for {topic}",)
-
-    @classmethod
-    def IS_CHANGED(cls, topic):
-        """
-        Determines if the node needs re-execution based on input changes.
-
-        For web/API endpoint nodes, consider:
-        - Whether the endpoint returns dynamic data
-        - Caching requirements for your use case
-        - Rate limiting considerations
-
-        Return options:
-        - float('nan'): Always re-run (for dynamic/real-time data)
-        - Hash of inputs: Re-run only when inputs change (for stable endpoints)
-
-        Example customizations:
-            # Always fetch fresh data:
-            return float('nan')
-
-            # Include timestamp for time-based refresh:
-            import time
-            return hash((topic, int(time.time() / 60)))  # Refresh every minute
-        """
-        # Default: hash inputs for caching
-        # Change to float('nan') if your endpoint returns dynamic data
-        return hash(topic)
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="{{NodeName}}",
+            display_name="{{NodeName}}",
+            category="custom",
+            description="{{NodeDesc}}",
+            inputs=[
+                IO.String.Input("topic", default="demo", tooltip="Topic to generate for."),
+            ],
+            outputs=[
+                IO.String.Output("result"),
+            ],
+        )
 
     @classmethod
-    def VALIDATE_INPUTS(cls, topic):
-        """
-        Validates inputs before the node executes.
+    def execute(cls, topic) -> IO.NodeOutput:
+        return IO.NodeOutput(generate(topic))
 
-        For web/API endpoint nodes, validate:
-        - Required parameters are present
-        - Parameter formats match expected patterns
-        - Values are within acceptable ranges
-
-        Return values:
-        - True: All inputs are valid
-        - String: Error message describing the validation failure
-
-        Example customizations:
-            # Validate topic format:
-            if not topic.replace('_', '').replace('-', '').isalnum():
-                return "topic must contain only alphanumeric characters, hyphens, and underscores"
-
-            # Check topic length:
-            if len(topic) > 100:
-                return "topic cannot exceed 100 characters"
-        """
-        # Validate topic is not empty
+    @classmethod
+    def validate_inputs(cls, topic) -> bool | str:
         if not topic or not topic.strip():
             return "topic is required and cannot be empty"
-
-        # Validate topic length (reasonable limit)
         if len(topic) > 500:
             return f"topic length ({len(topic)}) exceeds maximum of 500 characters"
-
-        # All validations passed
         return True
-
-
-NODE_CLASS_MAPPINGS = {"{{NodeName}}": {{NodeName}}}
-NODE_DISPLAY_NAME_MAPPINGS = {"{{NodeName}}": "{{NodeName}}"}

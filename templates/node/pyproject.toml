@@ -11,6 +11,6 @@ dependencies  = ["{{Dependencies}}"]
 Repository = ""
 
 [tool.comfy]
-PublisherId = "{{PublisherId}}"
+PublisherId = "{{PubID}}"
 DisplayName = "{{DisplayName}}"
 Icon = ""

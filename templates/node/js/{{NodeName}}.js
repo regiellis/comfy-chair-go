@@ -1,48 +1,28 @@
 import { app } from "../../scripts/app.js";
 
+// Frontend extension for {{NodeName}}. The frontend API is the same for V1
+// and V3 nodes; match nodes by their node_id (nodeData.name / comfyClass).
 app.registerExtension({
-    name: "{{NodeNameLower}}", // Will be replaced at creation
+    name: "{{NodeNameLower}}",
 
     async setup() {
-        // This function runs when the extension is loaded
         console.log("[{{NodeName}}] Extension loaded.");
-        // Example: Add a custom button to the UI (optional)
-        // const btn = document.createElement('button');
-        // btn.textContent = 'Click me!';
-        // btn.onclick = () => alert('Button clicked!');
-        // document.body.appendChild(btn);
     },
 
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        // This function runs before the node is registered in the UI
-        if (nodeData.name === "{{NodeName}}") {
-            // Set a custom description
-            nodeData.description = "This is a custom node for ComfyUI. It demonstrates various input types and options.";
+        if (nodeData.name !== "{{NodeName}}") return;
 
-            // Customize the node's display
-            nodeData.displayOptions = {
-                // Show the input_text in the node's title if available
-                title: function(node, inputData) {
-                    const inputText = inputData.input_text?.[0];
-                    return inputText ? `{{NodeName}}: ${inputText}` : "{{NodeName}}";
-                },
-                // Add a custom toolbar button
-                toolbar: [
-                    {
-                        name: "Info",
-                        action: function(node, app) {
-                            app.ui.dialog.show(
-                                "{{NodeName}} Info",
-                                `This node processes various inputs and returns transformed outputs.
-                                \n\nInputs: text, number, boolean, choice, and optional text.
-                                \nOutputs: transformed versions of each input.`
-                            );
-                        }
-                    }
-                ]
-            };
-        }
-    }
+        // Example: run code when an instance of this node is created.
+        const onNodeCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function () {
+            const ret = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+            // Customize the node instance here (extra widgets, styling, handlers).
+            return ret;
+        };
+    },
+
+    async nodeCreated(node) {
+        if (node?.comfyClass !== "{{NodeName}}") return;
+        // Alternative hook: runs for every created instance of this node.
+    },
 });
-
-// For advanced usage, see the ComfyUI extension API documentation and source code.
