@@ -62,8 +62,36 @@ func resolveRoot(envs []Env, envName, assetType string) (string, error) {
 	return "", fmt.Errorf("unknown environment %q", envName)
 }
 
+// resolveExisting resolves symlinks in the deepest existing ancestor of p and
+// re-appends the not-yet-created tail, so destinations of mkdir/rename/copy can
+// be validated before they exist.
+func resolveExisting(p string) (string, error) {
+	cur, rest := p, ""
+	for {
+		resolved, err := filepath.EvalSymlinks(cur)
+		if err == nil {
+			if rest == "" {
+				return resolved, nil
+			}
+			return filepath.Join(resolved, rest), nil
+		}
+		// An entry that exists but cannot be resolved (dangling or looping
+		// symlink) is never safe to treat as a plain missing file.
+		if _, lerr := os.Lstat(cur); lerr == nil {
+			return "", err
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", err
+		}
+		cur, rest = parent, filepath.Join(filepath.Base(cur), rest)
+	}
+}
+
 // resolveAssetPath validates a client-supplied relative path and returns the
-// absolute path, guaranteed to live inside the env/type root.
+// absolute path, guaranteed to live inside the env/type root. The check is both
+// lexical and symlink-aware: a symlinked directory inside a root must not be
+// usable as an exit, while a root that is itself a symlink keeps working.
 func resolveAssetPath(envs []Env, envName, assetType, relPath string) (string, error) {
 	root, err := resolveRoot(envs, envName, assetType)
 	if err != nil {
@@ -77,7 +105,31 @@ func resolveAssetPath(envs []Env, envName, assetType, relPath string) (string, e
 	if !strings.HasPrefix(abs, filepath.Clean(root)+string(filepath.Separator)) {
 		return "", fmt.Errorf("path %q escapes the asset root", relPath)
 	}
+	realRoot, err := resolveExisting(filepath.Clean(root))
+	if err != nil {
+		return "", fmt.Errorf("path %q escapes the asset root", relPath)
+	}
+	realAbs, err := resolveExisting(abs)
+	if err != nil {
+		return "", fmt.Errorf("path %q escapes the asset root", relPath)
+	}
+	if !strings.HasPrefix(realAbs, realRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q escapes the asset root", relPath)
+	}
 	return abs, nil
+}
+
+// cleanFolder normalizes a client-supplied folder filter to a slash-separated
+// relative path. ok is false when the folder would escape the asset root.
+func cleanFolder(folder string) (clean string, ok bool) {
+	c := filepath.Clean(filepath.FromSlash(folder))
+	if c == "." || c == "" {
+		return "", true
+	}
+	if filepath.IsAbs(c) || c == ".." || strings.HasPrefix(c, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return strings.Trim(filepath.ToSlash(c), "/"), true
 }
 
 // Filter captures a listing query. Zero values mean "no constraint".
@@ -102,9 +154,9 @@ func scan(envs []Env, envName, assetType string) []Asset {
 // scanFilter walks the matching asset directories and applies the filter.
 func scanFilter(envs []Env, f Filter) []Asset {
 	var out []Asset
-	folder := strings.Trim(filepath.ToSlash(filepath.Clean(f.Folder)), "/")
-	if folder == "." {
-		folder = ""
+	folder, ok := cleanFolder(f.Folder)
+	if !ok {
+		return nil // a folder that escapes the root matches nothing
 	}
 	query := strings.ToLower(strings.TrimSpace(f.Query))
 	for _, e := range envs {
@@ -144,9 +196,9 @@ func scanFilter(envs []Env, f Filter) []Asset {
 // across the matching envs/types (union, sorted, trash excluded).
 func subfolders(envs []Env, f Filter) []string {
 	seen := map[string]bool{}
-	folder := strings.Trim(filepath.ToSlash(filepath.Clean(f.Folder)), "/")
-	if folder == "." {
-		folder = ""
+	folder, ok := cleanFolder(f.Folder)
+	if !ok {
+		return nil // a folder that escapes the root has no listable children
 	}
 	for _, e := range envs {
 		if f.Env != "" && e.Name != f.Env {

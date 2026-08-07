@@ -87,15 +87,15 @@ func SavePerformanceHistory(history *PerformanceHistory) error {
 		history.Metrics = history.Metrics[len(history.Metrics)-MaxHistoryEntries:]
 	}
 
-	f, err := os.Create(path)
+	data, err := json.MarshalIndent(history, "", "  ")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(history)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // RecordPerformanceMetric adds a new performance metric to history

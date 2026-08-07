@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/joho/godotenv v1.5.1
+	golang.org/x/image v0.42.0
 	golang.org/x/sys v0.33.0
 )
 
@@ -43,7 +44,6 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
-	golang.org/x/image v0.42.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/term v0.31.0 // indirect

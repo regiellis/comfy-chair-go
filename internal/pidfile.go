@@ -93,7 +93,11 @@ func (p *PIDFile) GetRunningPID() (pid int, isRunning bool) {
 	}
 
 	if IsProcessRunning(pid) {
-		return pid, true
+		if processLooksLikeComfyUI(pid) {
+			return pid, true
+		}
+		Log.Warning("PID %d from %s belongs to a different process now; treating the PID file as stale.", pid, p.path)
+		return pid, false
 	}
 
 	return pid, false // PID read, but process not running (stale)

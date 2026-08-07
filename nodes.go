@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 )
@@ -198,7 +199,15 @@ func createNewNode() {
 		return
 	}
 
-	customNodesDir := internal.ExpandUserPath(filepath.Join(appPaths.ComfyUIDir, internal.CustomNodesDir))
+	// Resolve the active environment so the files and the registry entry
+	// land in the same install (FindDefaultInstall ignores WORKING_COMFY_ENV
+	// and could register the node under a different environment).
+	activeInst, activeErr := internal.GetActiveComfyInstall()
+	nodeBaseDir := appPaths.ComfyUIDir
+	if activeErr == nil {
+		nodeBaseDir = activeInst.Path
+	}
+	customNodesDir := internal.ExpandUserPath(filepath.Join(nodeBaseDir, internal.CustomNodesDir))
 	if customNodesDir == "" {
 		fmt.Println(internal.ErrorStyle.Render("Invalid ComfyUI path detected. Please check your configuration."))
 		return
@@ -270,7 +279,9 @@ func createNewNode() {
 
 	// Auto-generate minimal example workflow JSON for the new node
 	exampleDir := filepath.Join(nodeDir, "example_workflows")
-	if err := os.MkdirAll(exampleDir, 0755); err != nil {
+	if err := internal.DryRunExecute("Create example workflows directory: %s", func() error {
+		return os.MkdirAll(exampleDir, 0755)
+	}, exampleDir); err != nil {
 		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to create example workflows directory: %v", err)))
 	}
 	examplePath := filepath.Join(exampleDir, nodeName+"_example.json")
@@ -302,24 +313,28 @@ func createNewNode() {
 		Extra: map[string]any{"description": "Auto-generated example workflow for node '" + nodeName + "'. Edit as needed."},
 	}
 	if data, err := json.MarshalIndent(workflow, "", "  "); err == nil {
-		if err := os.WriteFile(examplePath, data, 0644); err != nil {
+		if err := internal.DryRunExecute("Write example workflow: %s", func() error {
+			return os.WriteFile(examplePath, data, 0644)
+		}, examplePath); err != nil {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to write example workflow: %v", err)))
-		} else {
+		} else if !internal.IsDryRun() {
 			fmt.Println(internal.InfoStyle.Render("Example workflow created at: " + examplePath))
 		}
 	} else {
 		fmt.Println(internal.WarningStyle.Render("Failed to create example workflow JSON: " + err.Error()))
 	}
 
-	// Update comfy-installs.json (add node to CustomNodes)
+	// Update comfy-installs.json (add node to the active environment)
 	cfg, err := internal.LoadGlobalConfig()
-	if err == nil {
-		inst := cfg.FindDefaultInstall()
+	if err == nil && activeErr == nil {
+		inst := cfg.FindInstallByType(activeInst.Type)
 		if inst != nil {
 			// Only add if not already present
 			if !slices.Contains(inst.CustomNodes, nodeName) {
 				inst.CustomNodes = append(inst.CustomNodes, nodeName)
-				if err := internal.SaveGlobalConfig(cfg); err != nil {
+				if err := internal.DryRunExecute("Register node %s in comfy-installs.json", func() error {
+					return internal.SaveGlobalConfig(cfg)
+				}, nodeName); err != nil {
 					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to update config with new node: %v", err)))
 				}
 			}
@@ -492,16 +507,24 @@ func deleteCustomNode() {
 	}
 
 	nodeDir := internal.ExpandUserPath(filepath.Join(customNodesDir, nodeName))
-	if err := os.RemoveAll(nodeDir); err != nil {
+	if err := internal.DryRunExecute("Delete node directory: %s", func() error {
+		return os.RemoveAll(nodeDir)
+	}, nodeDir); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to delete node '%s': %v", nodeName, err)))
 		return
 	}
-	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Node '%s' deleted successfully.", nodeName)))
+	if !internal.IsDryRun() {
+		fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Node '%s' deleted successfully.", nodeName)))
+	}
 
-	// Update comfy-installs.json (remove node from CustomNodes)
+	// Update comfy-installs.json: remove the node from the active
+	// environment's list (the same one the files were deleted from).
 	cfg, err := internal.LoadGlobalConfig()
 	if err == nil {
 		inst := cfg.FindDefaultInstall()
+		if active, aerr := internal.GetActiveComfyInstall(); aerr == nil {
+			inst = cfg.FindInstallByType(active.Type)
+		}
 		if inst != nil {
 			newNodes := make([]string, 0, len(inst.CustomNodes))
 			for _, n := range inst.CustomNodes {
@@ -510,7 +533,9 @@ func deleteCustomNode() {
 				}
 			}
 			inst.CustomNodes = newNodes
-			if err := internal.SaveGlobalConfig(cfg); err != nil {
+			if err := internal.DryRunExecute("Unregister node %s from comfy-installs.json", func() error {
+				return internal.SaveGlobalConfig(cfg)
+			}, nodeName); err != nil {
 				fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to update config after node deletion: %v", err)))
 			}
 		}
@@ -569,20 +594,26 @@ func packNode() {
 	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Node '%s' packed successfully: %s", nodeName, packedFilePath)))
 }
 
-// zipDirectory zips the contents of srcDir into destZip.
-func zipDirectory(srcDir, destZip string) error {
+// zipDirectory zips the contents of srcDir into destZip. On any failure the
+// partial archive is removed so a corrupt zip is never left behind, and close
+// errors are surfaced (a swallowed close error means a truncated central
+// directory that unzips as garbage).
+func zipDirectory(srcDir, destZip string) (err error) {
 	zipFile, err := os.Create(destZip)
 	if err != nil {
 		return err
 	}
-	defer zipFile.Close()
+	defer func() {
+		if err != nil {
+			os.Remove(destZip)
+		}
+	}()
 
 	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
 
-	return filepath.Walk(internal.ExpandUserPath(srcDir), func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	err = filepath.Walk(internal.ExpandUserPath(srcDir), func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 		relPath, err := filepath.Rel(internal.ExpandUserPath(srcDir), path)
 		if err != nil {
@@ -608,6 +639,13 @@ func zipDirectory(srcDir, destZip string) error {
 		_, err = io.Copy(w, file)
 		return err
 	})
+	if closeErr := zipWriter.Close(); err == nil {
+		err = closeErr
+	}
+	if closeErr := zipFile.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // updateCustomNodes updates selected or all custom nodes: git pull and install requirements.txt using uv or pip in the venv.
@@ -626,7 +664,7 @@ func updateCustomNodes() {
 		return
 	}
 	venvPath := filepath.Dir(filepath.Dir(venvPython))
-	venvBin := filepath.Join(venvPath, "bin")
+	venvBin := internal.VenvBinDir(venvPath)
 
 	files, err := os.ReadDir(customNodesDir)
 	if err != nil {
@@ -676,6 +714,11 @@ func updateCustomNodes() {
 
 		fmt.Println(internal.TitleStyle.Render(fmt.Sprintf("Updating %s", node)))
 
+		if internal.IsDryRun() {
+			internal.DryRunLog("Would run git pull and install requirements for node %s", node)
+			continue
+		}
+
 		// 1. git pull if .git exists
 		if _, err := os.Stat(filepath.Join(nodeDir, ".git")); err == nil {
 			fmt.Println(internal.InfoStyle.Render("Running git pull..."))
@@ -689,19 +732,16 @@ func updateCustomNodes() {
 		}
 
 		// 2. Try uv pip install -r requirements.txt (run from ComfyUI root so uv detects venv)
-		uvBinPath := filepath.Join(venvBin, "uv")
+		uvName := "uv"
+		if runtime.GOOS == "windows" {
+			uvName = "uv.exe"
+		}
+		uvBinPath := filepath.Join(venvBin, uvName)
 		uvPath := ""
 		if _, err := os.Stat(uvBinPath); err == nil {
 			uvPath = uvBinPath
 		} else if uvSys, err := exec.LookPath("uv"); err == nil {
 			uvPath = uvSys
-		}
-
-		pipPath := filepath.Join(venvBin, "pip")
-		if _, err := os.Stat(pipPath); err != nil {
-			if pipSys, err := exec.LookPath("pip"); err == nil {
-				pipPath = pipSys
-			}
 		}
 
 		var installErr error
@@ -716,7 +756,7 @@ func updateCustomNodes() {
 			fmt.Println(internal.InfoStyle.Render("Trying uv pip install -r requirements.txt ..."))
 			cmdUv := exec.Command(uvPath, "pip", "install", "-r", relReqFile)
 			cmdUv.Dir = internal.ExpandUserPath(appPaths.ComfyUIDir)
-			cmdUv.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+			cmdUv.Env = append(os.Environ(), "PATH="+venvBin+string(os.PathListSeparator)+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
 			cmdUv.Stdout = os.Stdout
 			cmdUv.Stderr = os.Stderr
 			installErr = cmdUv.Run()
@@ -728,7 +768,7 @@ func updateCustomNodes() {
 					fmt.Println(internal.InfoStyle.Render("Retrying requirements installation after fixing compatibility..."))
 					cmdUvRetry := exec.Command(uvPath, "pip", "install", "-r", relReqFile)
 					cmdUvRetry.Dir = internal.ExpandUserPath(appPaths.ComfyUIDir)
-					cmdUvRetry.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+					cmdUvRetry.Env = append(os.Environ(), "PATH="+venvBin+string(os.PathListSeparator)+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
 					cmdUvRetry.Stdout = os.Stdout
 					cmdUvRetry.Stderr = os.Stderr
 					if retryErr := cmdUvRetry.Run(); retryErr == nil {
@@ -741,10 +781,12 @@ func updateCustomNodes() {
 			}
 		}
 		if uvPath == "" || installErr != nil {
-			fmt.Println(internal.InfoStyle.Render("Falling back to pip install -r requirements.txt ..."))
-			cmdPip := exec.Command(pipPath, "install", "-r", reqFile)
+			// Use the venv's own interpreter: a bare `pip` from PATH would
+			// install into the system Python instead of the venv.
+			fmt.Println(internal.InfoStyle.Render("Falling back to python -m pip install -r requirements.txt ..."))
+			cmdPip := exec.Command(venvPython, "-m", "pip", "install", "-r", reqFile)
 			cmdPip.Dir = nodeDir
-			cmdPip.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+			cmdPip.Env = append(os.Environ(), "PATH="+venvBin+string(os.PathListSeparator)+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
 			cmdPip.Stdout = os.Stdout
 			cmdPip.Stderr = os.Stderr
 			if err := cmdPip.Run(); err != nil {
@@ -814,7 +856,9 @@ func addOrRemoveNodeWorkflows() {
 		}
 		for _, f := range files {
 			if !f.IsDir() && strings.HasSuffix(f.Name(), ".json") {
-				workflowFiles = append(workflowFiles, f.Name())
+				// Prefix with the source dir so same-named workflows in
+				// example_workflows/ and workflows/ stay distinct.
+				workflowFiles = append(workflowFiles, dir+"/"+f.Name())
 				workflowPaths = append(workflowPaths, filepath.Join(wfDir, f.Name()))
 			}
 		}
@@ -881,7 +925,7 @@ func addOrRemoveNodeWorkflows() {
 			for _, sel := range selected {
 				if wf == sel {
 					src := workflowPaths[i]
-					dst := filepath.Join(mainWorkflowsDir, nodeName+"__"+wf)
+					dst := filepath.Join(mainWorkflowsDir, nodeName+"__"+filepath.Base(wf))
 					input, err := os.ReadFile(src)
 					if err != nil {
 						fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to read %s: %v", src, err)))
@@ -895,7 +939,12 @@ func addOrRemoveNodeWorkflows() {
 				}
 			}
 		}
-		tracking[nodeName] = append(tracking[nodeName], selected...)
+		// Dedupe: running "add" twice must not duplicate tracking entries.
+		for _, sel := range selected {
+			if !slices.Contains(tracking[nodeName], sel) {
+				tracking[nodeName] = append(tracking[nodeName], sel)
+			}
+		}
 		if data, err := json.MarshalIndent(tracking, "", "  "); err != nil {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Failed to marshal tracking data: %v", err)))
 		} else if err := os.WriteFile(trackingFile, data, 0644); err != nil {
@@ -905,7 +954,9 @@ func addOrRemoveNodeWorkflows() {
 	} else if action == "remove" {
 		removed := []string{}
 		for _, wf := range selected {
-			filename := nodeName + "__" + wf
+			// Base name: selections (and legacy tracking entries) may carry
+			// a source-dir prefix that is not part of the copied filename.
+			filename := nodeName + "__" + filepath.Base(wf)
 			path := filepath.Join(mainWorkflowsDir, filename)
 			if err := os.Remove(path); err == nil {
 				removed = append(removed, filename)

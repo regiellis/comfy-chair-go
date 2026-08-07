@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -49,15 +50,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/thumb", s.handleThumb)
 	mux.HandleFunc("GET /api/file", s.handleFile)
 	mux.HandleFunc("GET /api/meta", s.handleMeta)
-	mux.HandleFunc("POST /api/delete", s.handleDelete)
-	mux.HandleFunc("POST /api/transfer", s.handleTransfer)
-	mux.HandleFunc("POST /api/extract-workflow", s.handleExtractWorkflow)
-	mux.HandleFunc("POST /api/empty-trash", s.handleEmptyTrash)
-	mux.HandleFunc("POST /api/rename", s.handleRename)
-	mux.HandleFunc("POST /api/mkdir", s.handleMkdir)
-	mux.HandleFunc("POST /api/move-folder", s.handleMoveFolder)
-	mux.HandleFunc("POST /api/delete-folder", s.handleDeleteFolder)
-	mux.HandleFunc("POST /api/clean-folders", s.handleCleanFolders)
+	mux.HandleFunc("POST /api/delete", mutating(s.handleDelete))
+	mux.HandleFunc("POST /api/transfer", mutating(s.handleTransfer))
+	mux.HandleFunc("POST /api/extract-workflow", mutating(s.handleExtractWorkflow))
+	mux.HandleFunc("POST /api/empty-trash", mutating(s.handleEmptyTrash))
+	mux.HandleFunc("POST /api/rename", mutating(s.handleRename))
+	mux.HandleFunc("POST /api/mkdir", mutating(s.handleMkdir))
+	mux.HandleFunc("POST /api/move-folder", mutating(s.handleMoveFolder))
+	mux.HandleFunc("POST /api/delete-folder", mutating(s.handleDeleteFolder))
+	mux.HandleFunc("POST /api/clean-folders", mutating(s.handleCleanFolders))
 
 	web, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServerFS(web))
@@ -69,6 +70,28 @@ func (s *Server) Handler() http.Handler {
 // loudly when host is anything other than a loopback address.
 func (s *Server) Listen(host string, port int) error {
 	return http.ListenAndServe(net.JoinHostPort(host, strconv.Itoa(port)), s.Handler())
+}
+
+// mutating guards a state-changing endpoint. The API has no auth layer, so a
+// page on another origin must not be able to drive it: requiring a JSON content
+// type rules out simple cross-origin form posts, and a present Origin header
+// must match the host the request was sent to (also catching DNS rebinding).
+func mutating(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil || mt != "application/json" {
+			writeErr(w, http.StatusUnsupportedMediaType, fmt.Errorf("content-type must be application/json"))
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || u.Host != r.Host {
+				writeErr(w, http.StatusForbidden, fmt.Errorf("cross-origin request rejected"))
+				return
+			}
+		}
+		h(w, r)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -284,6 +307,15 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
+	}
+	// Never let the browser sniff a media file into something scriptable, and
+	// hand anything that is not known media to the user as a download — an
+	// .html or .svg dropped in output/ would otherwise be stored XSS.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	switch kindForExt[strings.ToLower(filepath.Ext(abs))] {
+	case "image", "video", "audio":
+	default:
+		w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filepath.Base(abs)))
 	}
 	// http.ServeFile provides range requests, which video playback needs.
 	http.ServeFile(w, r, abs)

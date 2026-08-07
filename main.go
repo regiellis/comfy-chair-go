@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -108,7 +109,9 @@ func initPaths() error {
 
 	comfyPathFromEnv := stripQuotes(os.Getenv(internal.ComfyUIPathKey))
 	if comfyPathFromEnv != "" {
-		absComfyPath, pathErr := filepath.Abs(comfyPathFromEnv)
+		// Expand {HOME}/{USERPROFILE} before Abs, or the placeholder gets
+		// glued onto the cwd and never resolves.
+		absComfyPath, pathErr := filepath.Abs(internal.ExpandUserPath(comfyPathFromEnv))
 		if pathErr != nil {
 			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Warning: COMFYUI_PATH '%s' is not a valid path: %v. Ignoring.", comfyPathFromEnv, pathErr)))
 		} else if stat, err := os.Stat(internal.ExpandUserPath(absComfyPath)); err == nil && stat.IsDir() {
@@ -185,8 +188,13 @@ func startComfyUI(inst *internal.ComfyInstall, background bool) {
 		}
 	}
 	if background {
+		// Truncate in place rather than removing: the reload watcher tails
+		// this file by fd, and unlinking it would leave the tail reading a
+		// dead inode for the rest of the session.
 		if _, err := os.Stat(internal.ExpandUserPath(logFile)); err == nil {
-			os.Remove(internal.ExpandUserPath(logFile))
+			if err := os.Truncate(internal.ExpandUserPath(logFile), 0); err != nil {
+				internal.Log.Warning("Could not truncate log file %s: %v", logFile, err)
+			}
 		}
 	}
 
@@ -288,7 +296,6 @@ func updateComfyUI(inst *internal.ComfyInstall) {
 		return
 	}
 	maybePopStash(comfyDir, stashed)
-	internal.PromptReturnToMenu()
 }
 
 // updateComfyUINightly updates ComfyUI to the latest nightly for the given environment.
@@ -320,7 +327,6 @@ func updateComfyUINightly(inst *internal.ComfyInstall) {
 		return
 	}
 	maybePopStash(comfyDir, stashed)
-	internal.PromptReturnToMenu()
 }
 
 // downgradeComfyUI downgrades ComfyUI to a selected tag for the given environment.
@@ -374,7 +380,6 @@ func downgradeComfyUI(inst *internal.ComfyInstall) {
 		return
 	}
 	maybePopStash(comfyDir, stashed)
-	internal.PromptReturnToMenu()
 }
 
 func ensureGitCleanOrStash(comfyDir string) (bool, bool, error) {
@@ -588,7 +593,11 @@ func updateComfyDepsWithUV(comfyDir, venvPython string) error {
 
 func resolveUvForVenv(venvPython string) string {
 	venvBin := filepath.Dir(venvPython)
-	uvPath := filepath.Join(venvBin, "uv")
+	uvName := "uv"
+	if runtime.GOOS == "windows" {
+		uvName = "uv.exe"
+	}
+	uvPath := filepath.Join(venvBin, uvName)
 	if stat, err := os.Stat(uvPath); err == nil && !stat.IsDir() {
 		return uvPath
 	}
@@ -640,7 +649,9 @@ func promptInstallationPath() (string, error) {
 		return "", fmt.Errorf("installation path cannot be empty")
 	}
 
-	installPath, err := filepath.Abs(installPath)
+	// Expand {HOME}/{USERPROFILE} before Abs so placeholders don't get
+	// resolved relative to the cwd.
+	installPath, err := filepath.Abs(internal.ExpandUserPath(installPath))
 	if err != nil {
 		return "", fmt.Errorf("failed to get absolute path: %w", err)
 	}
@@ -701,7 +712,9 @@ func installComfyUI() {
 		}
 		pythonVersion = pyVer
 	}
-	internal.UpdateEnvFile(appPaths.EnvFile, map[string]string{"GPU_TYPE": gpuType, "PYTHON_VERSION": pythonVersion})
+	if err := internal.UpdateEnvFile(appPaths.EnvFile, map[string]string{"GPU_TYPE": gpuType, "PYTHON_VERSION": pythonVersion}); err != nil {
+		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Could not persist GPU_TYPE/PYTHON_VERSION to %s: %v", appPaths.EnvFile, err)))
+	}
 
 	// AMD-specific: offer Zluda option
 	comfyRepo := internal.ComfyUIRepoURL
@@ -784,7 +797,9 @@ func installComfyUI() {
 					}
 				}
 				fmt.Println(internal.WarningStyle.Render("Deleting existing install..."))
-				if err := os.RemoveAll(internal.ExpandUserPath(installPath)); err != nil {
+				if err := internal.DryRunExecute("Delete existing install at %s", func() error {
+					return os.RemoveAll(internal.ExpandUserPath(installPath))
+				}, installPath); err != nil {
 					fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to remove existing install: %v", err)))
 					return
 				}
@@ -806,7 +821,9 @@ func installComfyUI() {
 				fmt.Println(internal.InfoStyle.Render("Installation cancelled."))
 				return
 			}
-			if err := os.RemoveAll(internal.ExpandUserPath(installPath)); err != nil {
+			if err := internal.DryRunExecute("Delete existing directory %s", func() error {
+				return os.RemoveAll(internal.ExpandUserPath(installPath))
+			}, installPath); err != nil {
 				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to remove existing directory: %v", err)))
 				return
 			}
@@ -966,8 +983,12 @@ func installComfyUI() {
 		fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("requirements.txt not found at %s. Skipping dependency installation.", currentInstallReqTxt)))
 	} else {
 		// Prefer venv's uv if available
-		venvBin := internal.ExpandUserPath(filepath.Join(currentInstallVenvPath, "bin"))
-		uvPath = internal.ExpandUserPath(filepath.Join(venvBin, "uv"))
+		venvBin := internal.ExpandUserPath(internal.VenvBinDir(currentInstallVenvPath))
+		uvName := "uv"
+		if runtime.GOOS == "windows" {
+			uvName = "uv.exe"
+		}
+		uvPath = internal.ExpandUserPath(filepath.Join(venvBin, uvName))
 		uvExec := ""
 		if stat, err := os.Stat(uvPath); err == nil && !stat.IsDir() {
 			uvExec = uvPath
@@ -986,7 +1007,7 @@ func installComfyUI() {
 			cmd.Stderr = os.Stderr
 			cmd.Env = append(os.Environ(),
 				"VIRTUAL_ENV="+currentInstallVenvPath,
-				"PATH="+venvBin+":"+os.Getenv("PATH"),
+				"PATH="+venvBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 			)
 			if err := cmd.Run(); err != nil {
 				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to install dependencies with uv: %v", err)))
@@ -1031,13 +1052,17 @@ func installComfyUI() {
 	}
 
 	// --- Install comfy-cli in venv ---
-	venvBin := internal.ExpandUserPath(filepath.Join(currentInstallVenvPath, "bin"))
-	uvPath = internal.ExpandUserPath(filepath.Join(venvBin, "uv"))
+	venvBin := internal.ExpandUserPath(internal.VenvBinDir(currentInstallVenvPath))
+	uvName := "uv"
+	if runtime.GOOS == "windows" {
+		uvName = "uv.exe"
+	}
+	uvPath = internal.ExpandUserPath(filepath.Join(venvBin, uvName))
 	if _, err := os.Stat(uvPath); err == nil {
 		fmt.Println(internal.InfoStyle.Render("Installing comfy-cli in virtual environment..."))
 		cmd := exec.Command(uvPath, "pip", "install", "comfy-cli")
 		cmd.Dir = installPath
-		cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"))
+		cmd.Env = append(os.Environ(), "PATH="+venvBin+string(os.PathListSeparator)+os.Getenv("PATH"), "VIRTUAL_ENV="+currentInstallVenvPath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -1048,7 +1073,13 @@ func installComfyUI() {
 	}
 
 	// --- Update comfy-installs.json (global config) ---
-	cfg, _ := internal.LoadGlobalConfig()
+	cfg, cfgErr := internal.LoadGlobalConfig()
+	if cfgErr != nil {
+		// Saving on top of an unreadable registry would wipe the other
+		// environments; stop and let the user fix or delete the file.
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Cannot update comfy-installs.json: %v", cfgErr)))
+		return
+	}
 	realComfyPath := filepath.Join(installPath)
 	newInstall := internal.ComfyInstall{
 		Name:      envType,
@@ -1162,7 +1193,9 @@ func removeEnv() {
 		return
 	}
 	cfg.RemoveInstallByType(inst.Type)
-	if err := internal.SaveGlobalConfig(cfg); err != nil {
+	if err := internal.DryRunExecute("Remove environment %s from comfy-installs.json", func() error {
+		return internal.SaveGlobalConfig(cfg)
+	}, selectedEnv); err != nil {
 		fmt.Println(internal.ErrorStyle.Render("Failed to update config: " + err.Error()))
 		return
 	}
@@ -1285,10 +1318,12 @@ func handleReloadFunction() {
 
 // handleWatchNodesFunction handles the watch nodes functionality
 func handleWatchNodesFunction() {
+	// No os.Exit here: this handler is also wired into the TUI menu, and
+	// exiting would kill the whole app instead of returning to the menu.
 	inst, err := internal.GetActiveComfyInstall()
 	if err != nil {
 		fmt.Println(internal.ErrorStyle.Render(err.Error()))
-		os.Exit(1)
+		return
 	}
 	customNodesDir := internal.ExpandUserPath(filepath.Join(inst.Path, "custom_nodes"))
 
@@ -1296,27 +1331,30 @@ func handleWatchNodesFunction() {
 	if err != nil {
 		if strings.Contains(err.Error(), "cancelled") {
 			fmt.Println(internal.InfoStyle.Render("Operation cancelled by user."))
-			os.Exit(0)
+			return
 		}
 		if strings.Contains(err.Error(), "no custom node directories") {
 			fmt.Println(internal.WarningStyle.Render("No custom node directories found to watch."))
-			os.Exit(0)
+			return
 		}
 		fmt.Println(internal.ErrorStyle.Render(err.Error()))
-		os.Exit(1)
+		return
 	}
 
 	if err := internal.SaveReloadIncludeDirs(inst.Type, selected); err != nil {
 		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update comfy-installs.json: %v", err)))
-		os.Exit(1)
+		return
 	}
 	fmt.Println(internal.SuccessStyle.Render(fmt.Sprintf("Updated comfy-installs.json: reload_include_dirs=%s", strings.Join(selected, ","))))
-	os.Exit(0)
 }
 
 // handleSetWorkingEnvFunction handles setting the working environment
 func handleSetWorkingEnvFunction() {
-	cfg, _ := internal.LoadGlobalConfig()
+	cfg, err := internal.LoadGlobalConfig()
+	if err != nil {
+		fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to load environments: %v", err)))
+		return
+	}
 	if len(cfg.Installs) == 0 {
 		fmt.Println(internal.WarningStyle.Render("No environments configured. Use 'Manage Environments' to add one."))
 		return
@@ -1346,10 +1384,13 @@ func handleSetWorkingEnvFunction() {
 		inst := cfg.FindInstallByType(internal.InstallType(selectedEnv))
 
 		if inst != nil {
-			internal.UpdateEnvFile(appPaths.EnvFile, map[string]string{
+			if err := internal.UpdateEnvFile(appPaths.EnvFile, map[string]string{
 				"WORKING_COMFY_ENV": selectedEnv,
 				"COMFYUI_PATH":      inst.Path,
-			})
+			}); err != nil {
+				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to update %s: %v", appPaths.EnvFile, err)))
+				return
+			}
 			fmt.Println(internal.SuccessStyle.Render("Working environment set to: " + selectedEnv + " (" + inst.Path + ")"))
 		} else {
 			fmt.Println(internal.ErrorStyle.Render("Selected environment not found in config."))
@@ -1387,10 +1428,12 @@ func waitForComfyUIStop(pid int) error {
 		if time.Since(startTime) > maxWaitTime {
 			return fmt.Errorf("timeout waiting for ComfyUI to stop")
 		}
-		if !internal.IsProcessRunning(pid) {
+		// Uncached check: the cached IsProcessRunning would report the dead
+		// process as alive for up to 5 seconds per poll.
+		if !internal.IsProcessRunningNow(pid) {
 			return nil
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
@@ -1398,6 +1441,10 @@ func waitForComfyUIStop(pid int) error {
 func stopComfyUI(inst *internal.ComfyInstall) {
 	pidFile := internal.ExpandUserPath(filepath.Join(inst.Path, internal.ComfyUIPidFile))
 	if pid, isRunning := internal.GetRunningPID(pidFile); isRunning {
+		if internal.IsDryRun() {
+			internal.DryRunLog("Would stop ComfyUI (PID: %d)", pid)
+			return
+		}
 		process, err := os.FindProcess(pid)
 		if err == nil {
 			if runtime.GOOS == "windows" {
@@ -1417,7 +1464,16 @@ func stopComfyUI(inst *internal.ComfyInstall) {
 
 // restartComfyUI restarts ComfyUI in the background for the given environment.
 func restartComfyUI(inst *internal.ComfyInstall) {
+	pidFile := internal.ExpandUserPath(filepath.Join(inst.Path, internal.ComfyUIPidFile))
+	pid, wasRunning := internal.GetRunningPID(pidFile)
 	stopComfyUI(inst)
+	if wasRunning && !internal.IsDryRun() {
+		// Wait for the old process to actually exit; starting immediately
+		// races it for the port and triggers a bogus port-conflict prompt.
+		if err := waitForComfyUIStop(pid); err != nil {
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Old ComfyUI process (PID %d) did not exit cleanly: %v", pid, err)))
+		}
+	}
 	startComfyUI(inst, true)
 }
 
@@ -1552,7 +1608,9 @@ func manageBrandedEnvironments() {
 			for i := range cfg.Installs {
 				cfg.Installs[i].IsDefault = cfg.Installs[i].Type == envType
 			}
-			if err := internal.SaveGlobalConfig(cfg); err != nil {
+			if err := internal.DryRunExecute("Set %s as default environment in comfy-installs.json", func() error {
+				return internal.SaveGlobalConfig(cfg)
+			}, envType); err != nil {
 				fmt.Println(internal.ErrorStyle.Render(fmt.Sprintf("Failed to save global config: %v", err)))
 				return
 			}
@@ -1685,9 +1743,13 @@ func migrateInputImages() {
 	pathsToCopy := map[string]struct{}{}
 	foldersToCopy := map[string]struct{}{}
 	results := []string{}
-	// Expand selection
+	// Expand selection; the custom-path sentinel is handled separately and
+	// must never be treated as a real file (ALL used to try to copy it).
 	if len(selected) == 1 && selected[0] == allOption {
 		for _, e := range entries {
+			if e.Path == "__CUSTOM__" {
+				continue
+			}
 			if e.IsDir {
 				foldersToCopy[e.Path] = struct{}{}
 			} else {
@@ -1697,13 +1759,33 @@ func migrateInputImages() {
 	} else {
 		for _, sel := range selected {
 			for _, e := range entries {
-				if sel == e.Path {
+				if sel == e.Path && e.Path != "__CUSTOM__" {
 					if e.IsDir {
 						foldersToCopy[e.Path] = struct{}{}
 					} else {
 						pathsToCopy[e.Path] = struct{}{}
 					}
 				}
+			}
+		}
+	}
+	if slices.Contains(selected, "__CUSTOM__") {
+		var customRel string
+		customForm := huh.NewForm(huh.NewGroup(
+			huh.NewInput().
+				Title("Enter a path relative to the input directory (file or folder):").
+				Value(&customRel),
+		)).WithTheme(huh.ThemeCharm())
+		if err := customForm.Run(); err == nil && strings.TrimSpace(customRel) != "" {
+			rel := filepath.Clean(strings.TrimSpace(customRel))
+			if filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") {
+				results = append(results, fmt.Sprintf("%s: %s", customRel, internal.ErrorStyle.Render("Path must stay inside the input directory")))
+			} else if stat, err := os.Stat(filepath.Join(srcInputDir, rel)); err != nil {
+				results = append(results, fmt.Sprintf("%s: %s", customRel, internal.ErrorStyle.Render("Not found in source input directory")))
+			} else if stat.IsDir() {
+				foldersToCopy[rel] = struct{}{}
+			} else {
+				pathsToCopy[rel] = struct{}{}
 			}
 		}
 	}
@@ -1889,18 +1971,20 @@ func migrateWorkflows() {
 			}
 		}
 	} else {
-		for _, sel := range selected {
-			// If folder, add all files under it
-			for _, e := range entries {
-				if !e.IsDir {
-					if sel == e.Path || (strings.HasSuffix(sel, string(os.PathSeparator)) && strings.HasPrefix(e.Path, sel)) {
-						pathsToCopy[e.Path] = struct{}{}
-					}
-				}
+		// Selection values are entry Paths (no trailing separator), so look
+		// up whether the selection is a folder and expand by prefix.
+		selectedIsDir := map[string]bool{}
+		for _, e := range entries {
+			if e.IsDir {
+				selectedIsDir[e.Path] = true
 			}
-			// If file, add directly
+		}
+		for _, sel := range selected {
 			for _, e := range entries {
-				if !e.IsDir && sel == e.Path {
+				if e.IsDir {
+					continue
+				}
+				if sel == e.Path || (selectedIsDir[sel] && strings.HasPrefix(e.Path, sel+string(os.PathSeparator))) {
 					pathsToCopy[e.Path] = struct{}{}
 				}
 			}

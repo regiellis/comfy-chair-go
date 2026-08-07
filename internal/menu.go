@@ -61,6 +61,7 @@ type MenuChoices struct {
 
 // ShowMainMenu displays the main menu loop and handles navigation
 func ShowMainMenu(choices MenuChoices, appPaths *Paths) {
+	SetInteractiveMode(true)
 	for {
 		var choice string
 		form := huh.NewForm(
@@ -373,9 +374,13 @@ func GetReloadSettings(inst *ComfyInstall) (watchDir string, debounce int, exts 
 	debounce = 5
 
 	if val := os.Getenv("COMFY_RELOAD_EXTS"); val != "" {
-		exts = strings.Split(val, ",")
-		for i := range exts {
-			exts[i] = strings.TrimSpace(exts[i])
+		exts = exts[:0]
+		for _, e := range strings.Split(val, ",") {
+			// Skip empties (trailing comma) — an empty extension would
+			// suffix-match every file and restart on any write.
+			if e = strings.TrimSpace(e); e != "" {
+				exts = append(exts, e)
+			}
 		}
 	}
 	if val := os.Getenv("COMFY_RELOAD_DEBOUNCE"); val != "" {
@@ -402,7 +407,11 @@ func GetReloadSettings(inst *ComfyInstall) (watchDir string, debounce int, exts 
 
 // handleSetWorkingEnv handles setting the working environment
 func handleSetWorkingEnv(appPaths *Paths) {
-	cfg, _ := LoadGlobalConfig()
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		fmt.Println(ErrorStyle.Render(fmt.Sprintf("Failed to load environments: %v", err)))
+		return
+	}
 	if len(cfg.Installs) == 0 {
 		fmt.Println(WarningStyle.Render("No environments configured. Use 'Manage Environments' to add one."))
 		return

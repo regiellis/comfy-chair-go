@@ -18,6 +18,11 @@ func readPNGTextChunks(path string) (map[string]string, error) {
 		return nil, err
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	fileSize := info.Size()
 
 	sig := make([]byte, len(pngSignature))
 	if _, err := io.ReadFull(f, sig); err != nil || !bytes.Equal(sig, pngSignature) {
@@ -30,8 +35,14 @@ func readPNGTextChunks(path string) (map[string]string, error) {
 		if _, err := io.ReadFull(f, header); err != nil {
 			break // EOF or truncated file: return what we have
 		}
-		length := binary.BigEndian.Uint32(header[:4])
+		length := int64(binary.BigEndian.Uint32(header[:4]))
 		chunkType := string(header[4:8])
+		// A chunk claiming more bytes than the file holds is corrupt or hostile;
+		// never allocate on the declared length alone.
+		pos, err := f.Seek(0, io.SeekCurrent)
+		if err != nil || length > fileSize-pos {
+			break
+		}
 		if chunkType == "IEND" {
 			break
 		}
@@ -52,7 +63,7 @@ func readPNGTextChunks(path string) (map[string]string, error) {
 			}
 			continue
 		}
-		if _, err := f.Seek(int64(length)+4, io.SeekCurrent); err != nil { // data + CRC
+		if _, err := f.Seek(length+4, io.SeekCurrent); err != nil { // data + CRC
 			break
 		}
 	}

@@ -132,7 +132,9 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	var groups []groupVM
 	prevLabel := ""
-	if grouped && offset > 0 {
+	// An offset past the end happens on a stale infinite-scroll page (files
+	// deleted between requests) as well as on a hand-crafted URL.
+	if grouped && offset > 0 && offset-1 < total {
 		prevLabel = GroupLabel(items[offset-1].ModTime, now)
 	}
 	for _, a := range page {

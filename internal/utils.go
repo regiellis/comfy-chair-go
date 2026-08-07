@@ -149,25 +149,29 @@ func LoadGlobalConfig() (*GlobalConfig, error) {
 	var cfg GlobalConfig
 	dec := json.NewDecoder(f)
 	if err := dec.Decode(&cfg); err != nil {
-		return nil, err
+		// Return a usable empty config alongside the error so callers that
+		// ignore it don't dereference nil.
+		return &GlobalConfig{}, fmt.Errorf("failed to parse %s: %w", path, err)
 	}
 	return &cfg, nil
 }
 
-// SaveGlobalConfig writes the global config to disk.
+// SaveGlobalConfig writes the global config to disk atomically (temp file +
+// rename), so an interrupted write can't truncate the environment registry.
 func SaveGlobalConfig(cfg *GlobalConfig) error {
 	path, err := GetConfigFilePath()
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(path)
+	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	return enc.Encode(cfg)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // FindInstallByType returns the install of a given type, or nil if not found.
@@ -257,17 +261,6 @@ func containsPathTraversal(path string) bool {
 	for _, part := range parts {
 		if part == ".." {
 			return true
-		}
-	}
-
-	// Additional check for absolute paths trying to access system directories
-	if runtime.GOOS != "windows" {
-		// On Unix-like systems, check for attempts to access sensitive system paths
-		dangerousPaths := []string{"/etc", "/sys", "/proc", "/dev", "/root"}
-		for _, dangerous := range dangerousPaths {
-			if strings.HasPrefix(path, dangerous) {
-				return true
-			}
 		}
 	}
 

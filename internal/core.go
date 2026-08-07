@@ -113,11 +113,18 @@ func RunWithEnvConfirmation(action string, fn func(inst *ComfyInstall)) {
 		inst := cfg.FindInstallByType(InstallType(workingEnv))
 		if inst != nil {
 			fn(inst)
+			PromptReturnToMenu()
 			return
 		}
+		Log.Warning("Working environment '%s' not found in configuration; select one below.", workingEnv)
 	}
 	inst := cfg.FindDefaultInstall()
-	if len(cfg.Installs) > 1 && workingEnv == "" {
+	if inst == nil && len(cfg.Installs) == 1 {
+		// A single registered environment is unambiguous even without the
+		// default flag set.
+		inst = &cfg.Installs[0]
+	}
+	if len(cfg.Installs) > 1 {
 		var envOptions []huh.Option[string]
 		for _, i := range cfg.Installs {
 			label := string(i.Type)
@@ -154,8 +161,19 @@ func RunWithEnvConfirmation(action string, fn func(inst *ComfyInstall)) {
 	PromptReturnToMenu()
 }
 
-// PromptReturnToMenu shows a prompt to return to the main menu
+// interactiveMode is true while the TUI menu loop is running. CLI-invoked
+// commands must not end with an interactive "return to menu" prompt.
+var interactiveMode bool
+
+// SetInteractiveMode marks the session as running the interactive TUI menu.
+func SetInteractiveMode(on bool) { interactiveMode = on }
+
+// PromptReturnToMenu shows a prompt to return to the main menu. It is a no-op
+// when not running inside the interactive menu.
 func PromptReturnToMenu() {
+	if !interactiveMode {
+		return
+	}
 	var dummy string
 	form := huh.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().

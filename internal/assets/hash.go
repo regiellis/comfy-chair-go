@@ -34,6 +34,19 @@ func loadHashCache(path string) *hashCache {
 	return hc
 }
 
+// prune drops entries for files that no longer exist, so the cache does not
+// grow forever as assets are deleted or moved.
+func (hc *hashCache) prune() {
+	hc.mu.Lock()
+	defer hc.mu.Unlock()
+	for p := range hc.m {
+		if _, err := os.Stat(p); err != nil && os.IsNotExist(err) {
+			delete(hc.m, p)
+			hc.dirty = true
+		}
+	}
+}
+
 func (hc *hashCache) save() {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
@@ -140,6 +153,7 @@ func findDuplicates(envs []Env, f Filter, hc *hashCache) []DupeGroup {
 	for r := range results {
 		byHash[r.sum] = append(byHash[r.sum], r.asset)
 	}
+	hc.prune()
 	hc.save()
 
 	var out []DupeGroup

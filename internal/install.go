@@ -170,21 +170,33 @@ func copyDir(src, dst string) error {
 	})
 }
 
+// VenvBinDir returns the venv's executables directory ("bin" on POSIX,
+// "Scripts" on Windows).
+func VenvBinDir(venvPath string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(venvPath, "Scripts")
+	}
+	return filepath.Join(venvPath, "bin")
+}
+
+// venvPathEnv builds a PATH value with the venv bin dir prepended, using the
+// platform's list separator.
+func venvPathEnv(venvBin string) string {
+	return "PATH=" + venvBin + string(os.PathListSeparator) + os.Getenv("PATH")
+}
+
 // EnsurePipCompatibility ensures pip works correctly in uv-managed environments
 func EnsurePipCompatibility(venvPath, uvPath string) error {
 	if uvPath == "" {
 		return nil // Not a uv environment
 	}
 
-	venvBin := filepath.Join(venvPath, "bin")
-	if strings.Contains(venvPath, "\\") || strings.Contains(venvPath, ":\\") {
-		venvBin = filepath.Join(venvPath, "Scripts") // Windows
-	}
+	venvBin := VenvBinDir(venvPath)
 
 	// Run uv pip install -U pip to ensure pip compatibility
 	fmt.Println(InfoStyle.Render("Ensuring pip compatibility in uv environment..."))
 	cmd := exec.Command(uvPath, "pip", "install", "-U", "pip")
-	cmd.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+	cmd.Env = append(os.Environ(), venvPathEnv(venvBin), "VIRTUAL_ENV="+venvPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -240,22 +252,13 @@ func DetectAndFixPipUvConflict(err error, venvPath, uvPath string) error {
 
 // installNodeRequirements tries uv pip install -r requirements.txt, falls back to pip if uv is not found.
 func installNodeRequirements(venvPath, nodeDir, reqFile string) error {
-	venvBin := filepath.Join(venvPath, "bin")
-	if strings.Contains(venvPath, "\\") || strings.Contains(venvPath, ":\\") {
-		venvBin = filepath.Join(venvPath, "Scripts") // Windows
-	}
+	venvBin := VenvBinDir(venvPath)
 	uvPath := filepath.Join(venvBin, "uv")
 	if _, err := os.Stat(uvPath); err != nil {
 		if uvSys, err := exec.LookPath("uv"); err == nil {
 			uvPath = uvSys
 		} else {
 			uvPath = ""
-		}
-	}
-	pipPath := filepath.Join(venvBin, "pip")
-	if _, err := os.Stat(pipPath); err != nil {
-		if pipSys, err := exec.LookPath("pip"); err == nil {
-			pipPath = pipSys
 		}
 	}
 	var installErr error
@@ -267,7 +270,7 @@ func installNodeRequirements(venvPath, nodeDir, reqFile string) error {
 
 		cmdUv := exec.Command(uvPath, "pip", "install", "-r", reqFile)
 		cmdUv.Dir = nodeDir
-		cmdUv.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+		cmdUv.Env = append(os.Environ(), venvPathEnv(venvBin), "VIRTUAL_ENV="+venvPath)
 		installErr = cmdUv.Run()
 
 		if installErr != nil {
@@ -277,7 +280,7 @@ func installNodeRequirements(venvPath, nodeDir, reqFile string) error {
 				fmt.Println(InfoStyle.Render("Retrying requirements installation after fixing compatibility..."))
 				cmdUvRetry := exec.Command(uvPath, "pip", "install", "-r", reqFile)
 				cmdUvRetry.Dir = nodeDir
-				cmdUvRetry.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+				cmdUvRetry.Env = append(os.Environ(), venvPathEnv(venvBin), "VIRTUAL_ENV="+venvPath)
 				if retryErr := cmdUvRetry.Run(); retryErr == nil {
 					fmt.Println(SuccessStyle.Render("Requirements installed successfully after fixing compatibility"))
 					return nil
@@ -287,9 +290,21 @@ func installNodeRequirements(venvPath, nodeDir, reqFile string) error {
 			return nil
 		}
 	}
-	// Fallback to pip
-	cmdPip := exec.Command(pipPath, "install", "-r", reqFile)
+	// Fallback: run pip as a module of the venv's own interpreter. A bare
+	// `pip` from PATH would install into the system Python, not the venv.
+	pythonName := "python"
+	if runtime.GOOS == "windows" {
+		pythonName = "python.exe"
+	}
+	venvPython := filepath.Join(venvBin, pythonName)
+	if _, err := os.Stat(venvPython); err != nil {
+		if installErr != nil {
+			return fmt.Errorf("uv install failed (%v) and no python found in %s", installErr, venvBin)
+		}
+		return fmt.Errorf("no uv available and no python found in %s", venvBin)
+	}
+	cmdPip := exec.Command(venvPython, "-m", "pip", "install", "-r", reqFile)
 	cmdPip.Dir = nodeDir
-	cmdPip.Env = append(os.Environ(), "PATH="+venvBin+":"+os.Getenv("PATH"), "VIRTUAL_ENV="+venvPath)
+	cmdPip.Env = append(os.Environ(), venvPathEnv(venvBin), "VIRTUAL_ENV="+venvPath)
 	return cmdPip.Run()
 }

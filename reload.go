@@ -216,8 +216,11 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 	}
 	defer watcher.Close()
 
-	// Add only includedDirs to the watcher (opt-in), recursively
+	// Add only includedDirs to the watcher (opt-in), recursively. Roots are
+	// recorded post-symlink-resolution so events (which arrive with real
+	// paths) can be matched back to a watched root.
 	dirsWatched := 0
+	var watchRoots []string
 	for _, dir := range includedDirs {
 		watchPath := filepath.Join(watchDir, dir)
 		info, err := os.Lstat(watchPath)
@@ -246,6 +249,8 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 			continue
 		}
 
+		watchRoots = append(watchRoots, watchPath)
+
 		// Recursively add all subdirectories to the watcher, respecting .gitignore
 		err = filepath.Walk(watchPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -254,7 +259,7 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 			}
 
 			// Check if this path should be ignored
-			if shouldIgnorePath(path, watchDir) {
+			if shouldIgnorePath(path, watchPath) {
 				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Skipping ignored path: %s", strings.TrimPrefix(path, watchDir+string(filepath.Separator)))))
 				if info.IsDir() {
 					return filepath.SkipDir // Skip entire directory
@@ -285,11 +290,20 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Watching file extensions: %v", exts)))
 	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Watching custom node directories: %v", includedDirs)))
 	fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Debounce period: %d seconds", debounceSeconds)))
-	lastRestartTime := time.Now()
 	debounceDuration := time.Duration(debounceSeconds) * time.Second
+	// Start "cold" so the first save after launch restarts immediately.
+	lastRestartTime := time.Now().Add(-debounceDuration)
+	// Trailing debounce: changes inside the cooldown window are deferred and
+	// coalesced instead of silently dropped.
+	debounceTimer := time.NewTimer(debounceDuration)
+	if !debounceTimer.Stop() {
+		<-debounceTimer.C
+	}
+	pendingChange := ""
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigs)
 
 	// Create a done channel for proper shutdown coordination
 	done := make(chan struct{})
@@ -311,46 +325,74 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 		case <-done:
 			fmt.Println(internal.InfoStyle.Render("Shutdown signal received, stopping file watcher..."))
 			return nil
+		case <-debounceTimer.C:
+			fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", pendingChange)))
+			restartComfyUIProcess(inst, pidFile)
+			lastRestartTime = time.Now()
+			pendingChange = ""
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return nil
 			}
 
-			// Check if this file should be ignored
-			if shouldIgnorePath(event.Name, watchDir) {
-				// Silently ignore files that match ignore patterns
-				continue
-			}
-
-			// Log all file events for debugging
-			fileName := filepath.Base(event.Name)
-			relativePath := strings.TrimPrefix(event.Name, watchDir+string(filepath.Separator))
-			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("File event: %s on %s (op: %s)", event.Op, relativePath, event.Op)))
-
-			// Only trigger reload if the event is in an includedDir
-			inIncluded := false
-			for _, dir := range includedDirs {
-				if strings.Contains(filepath.ToSlash(event.Name), "/"+dir+"/") || strings.HasPrefix(filepath.ToSlash(event.Name), filepath.ToSlash(filepath.Join(watchDir, dir))) {
-					inIncluded = true
+			// Match the event (which arrives with the symlink-resolved real
+			// path) back to a watched root; reconstructing paths from the
+			// includedDirs names would reject events from symlinked dirs.
+			eventRoot := ""
+			for _, root := range watchRoots {
+				if event.Name == root || strings.HasPrefix(event.Name, root+string(filepath.Separator)) {
+					eventRoot = root
 					break
 				}
 			}
-
-			if !inIncluded {
+			relativePath := strings.TrimPrefix(event.Name, watchDir+string(filepath.Separator))
+			if eventRoot == "" {
 				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("File change ignored - %s not in watched custom node directories", relativePath)))
 				continue
 			}
 
+			// Check if this file should be ignored
+			if shouldIgnorePath(event.Name, eventRoot) {
+				// Silently ignore files that match ignore patterns
+				continue
+			}
+
+			fileName := filepath.Base(event.Name)
+			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("File event: %s on %s (op: %s)", event.Op, relativePath, event.Op)))
+
+			// Watch directories created while running, or edits inside them
+			// never trigger a reload.
+			if event.Op.Has(fsnotify.Create) {
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					_ = filepath.Walk(event.Name, func(path string, fi os.FileInfo, err error) error {
+						if err != nil || !fi.IsDir() {
+							return nil
+						}
+						if shouldIgnorePath(path, eventRoot) {
+							return filepath.SkipDir
+						}
+						if werr := watcher.Add(path); werr == nil {
+							fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Watching new directory: %s", path)))
+						}
+						return nil
+					})
+					continue
+				}
+			}
+
 			matched := matchesExtension(event.Name, exts)
-			fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Extension check: %s matches %v = %t", fileName, exts, matched)))
 
 			if (event.Op.Has(fsnotify.Write) || event.Op.Has(fsnotify.Create)) && matched {
-				if time.Since(lastRestartTime) > debounceDuration {
+				if time.Since(lastRestartTime) > debounceDuration && pendingChange == "" {
 					fmt.Println(internal.WarningStyle.Render(fmt.Sprintf("Changes detected in %s. Restarting ComfyUI...", relativePath)))
 					restartComfyUIProcess(inst, pidFile)
 					lastRestartTime = time.Now()
 				} else {
-					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Change detected in %s, but debouncing... (%.1fs remaining)", relativePath, debounceDuration.Seconds()-time.Since(lastRestartTime).Seconds())))
+					// Defer instead of dropping: re-arm the timer so the
+					// restart fires after the last change in the burst.
+					pendingChange = relativePath
+					debounceTimer.Reset(debounceDuration)
+					fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("Change detected in %s; restart deferred %.0fs (coalescing changes)", relativePath, debounceDuration.Seconds())))
 				}
 			} else if !matched {
 				fmt.Println(internal.InfoStyle.Render(fmt.Sprintf("File change ignored - %s does not match watched extensions %v", fileName, exts)))
@@ -366,6 +408,11 @@ func reloadComfyUI(inst *internal.ComfyInstall, watchDir string, debounceSeconds
 
 func matchesExtension(filePath string, exts []string) bool {
 	for _, ext := range exts {
+		// An empty extension (stray comma in COMFY_RELOAD_EXTS) would match
+		// every file.
+		if ext == "" {
+			continue
+		}
 		if strings.HasSuffix(strings.ToLower(filePath), strings.ToLower(ext)) {
 			return true
 		}
@@ -378,17 +425,19 @@ func restartComfyUIProcess(inst *internal.ComfyInstall, pidFile string) {
 	if isRunning {
 		process, err := os.FindProcess(pid)
 		if err == nil {
-			// Try graceful stop first (SIGTERM)
+			// Try graceful stop first (SIGTERM). Poll with the uncached
+			// check: the cached one would report the process alive for 5s
+			// and force-kill every time.
 			process.Signal(syscall.SIGTERM)
 			waited := 0
 			for waited < 20 { // Wait up to 2 seconds (20 * 100ms)
 				time.Sleep(100 * time.Millisecond)
-				if !internal.IsProcessRunning(pid) {
+				if !internal.IsProcessRunningNow(pid) {
 					break
 				}
 				waited++
 			}
-			if internal.IsProcessRunning(pid) {
+			if internal.IsProcessRunningNow(pid) {
 				if isWindows() {
 					process.Kill()
 				} else {
@@ -398,7 +447,7 @@ func restartComfyUIProcess(inst *internal.ComfyInstall, pidFile string) {
 				// Short delay to ensure process is fully terminated
 				for i := 0; i < 10; i++ {
 					time.Sleep(100 * time.Millisecond)
-					if !internal.IsProcessRunning(pid) {
+					if !internal.IsProcessRunningNow(pid) {
 						break
 					}
 				}

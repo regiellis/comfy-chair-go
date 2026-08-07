@@ -1,16 +1,16 @@
-# pyproject.tom
+# pyproject.toml
 [project]
-name = "{{NodeName}}"
-authors = ["{{Author}}"]
+name = "{{NodeNameLower}}"
+authors = [{ name = "{{Author}}" }]
 description = "{{NodeDesc}}"
 version = "{{Version}}"
+license = { text = "MIT" }
+dependencies = []
 
-license = {text = "{{License}}"}
-dependencies  = ["{{Dependencies}}"]
 [project.urls]
 Repository = ""
 
 [tool.comfy]
 PublisherId = "{{PubID}}"
-DisplayName = "{{DisplayName}}"
+DisplayName = "{{NodeName}}"
 Icon = ""

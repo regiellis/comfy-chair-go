@@ -78,18 +78,19 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 	}
 
 	// Handle logging and I/O redirection
+	var logFile *os.File
 	if logFilePath != "" && inBackground {
 		expandedLogPath := ExpandUserPath(logFilePath)
 		if expandedLogPath == "" {
 			return nil, fmt.Errorf("invalid log file path")
 		}
-		logFile, err := os.OpenFile(expandedLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		lf, err := os.OpenFile(expandedLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open log file %s: %w", logFilePath, err)
 		}
+		logFile = lf
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
-		cmd.ExtraFiles = []*os.File{logFile}
 	} else {
 		// For foreground processes, connect to stdin to allow interaction
 		cmd.Stdin = os.Stdin
@@ -98,10 +99,27 @@ func ExecuteCommand(commandName string, args []string, workDir string, logFilePa
 	}
 
 	if inBackground {
+		// Detach from the CLI's session/process group so closing the
+		// terminal doesn't SIGHUP the "background" server.
+		configureBackgroundSysProcAttr(cmd)
 		// Background mode: start process and return immediately
 		if err := cmd.Start(); err != nil {
+			if logFile != nil {
+				logFile.Close()
+			}
 			return nil, fmt.Errorf("command '%s %s' execution failed: %w", commandName, strings.Join(args, " "), err)
 		}
+		pid := cmd.Process.Pid
+		// Reap the child when it exits: without Wait it lingers as a zombie
+		// and kill(pid, 0) keeps reporting it alive, which stalls every
+		// stop/restart poll for the full timeout.
+		go func() {
+			_ = cmd.Wait()
+			if logFile != nil {
+				logFile.Close()
+			}
+			ProcCache.updateCache(pid, false)
+		}()
 		return cmd.Process, nil
 	} else {
 		// Foreground mode: start process and wait for completion
@@ -242,6 +260,56 @@ func IsProcessRunning(pid int) bool {
 	isRunning := isProcessRunningReal(pid)
 	ProcCache.updateCache(pid, isRunning)
 	return isRunning
+}
+
+// IsProcessRunningNow performs an uncached liveness check and refreshes the
+// cache. Use this in stop/restart polling loops, where the 5-second cache in
+// IsProcessRunning would otherwise keep reporting a dead process as alive.
+func IsProcessRunningNow(pid int) bool {
+	if pid == 0 {
+		return false
+	}
+	isRunning := isProcessRunningReal(pid)
+	ProcCache.updateCache(pid, isRunning)
+	return isRunning
+}
+
+// processLooksLikeComfyUI reports whether the process's command line looks
+// like a ComfyUI server (python running main.py). Used to avoid signalling an
+// unrelated process that reused a PID from a stale PID file (e.g. after a
+// reboot). Returns true when the command line cannot be determined, so we
+// never refuse to stop a genuinely running server just because introspection
+// failed.
+func processLooksLikeComfyUI(pid int) bool {
+	var cmdline string
+	switch runtime.GOOS {
+	case "linux":
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		if err != nil {
+			return true
+		}
+		cmdline = strings.ReplaceAll(string(data), "\x00", " ")
+	case "windows":
+		out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV").Output()
+		if err != nil {
+			return true
+		}
+		// Image name is the first CSV field; that's all tasklist gives us.
+		line := strings.TrimSpace(string(out))
+		fields := strings.Split(line, ",")
+		if len(fields) == 0 {
+			return true
+		}
+		return strings.Contains(strings.ToLower(strings.Trim(fields[0], "\"")), "python")
+	default: // darwin and other POSIX
+		out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+		if err != nil {
+			return true
+		}
+		cmdline = string(out)
+	}
+	lower := strings.ToLower(cmdline)
+	return strings.Contains(lower, "python") && strings.Contains(lower, "main.py")
 }
 
 // GetRunningPID reads PID from file and checks if the process is running.

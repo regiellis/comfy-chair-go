@@ -469,6 +469,134 @@ func TestHTMLViewsAndFilterBulk(t *testing.T) {
 	}
 }
 
+func TestFolderTraversalRejected(t *testing.T) {
+	envs := newTestEnvs(t)
+	for _, bad := range []string{"..", "../..", "../../..", "sub/../../..", "/etc"} {
+		if got := scanFilter(envs, Filter{Env: "lounge", Type: "output", Folder: bad}); len(got) != 0 {
+			t.Errorf("folder %q escaped the root: %d assets", bad, len(got))
+		}
+		if got := subfolders(envs, Filter{Env: "lounge", Type: "output", Folder: bad}); len(got) != 0 {
+			t.Errorf("folder %q listed dirs outside the root: %v", bad, got)
+		}
+	}
+	// The legitimate case still works.
+	if got := scanFilter(envs, Filter{Env: "lounge", Type: "output", Folder: "sub"}); len(got) != 1 {
+		t.Errorf("valid folder filter broke: %d assets", len(got))
+	}
+}
+
+func TestSymlinkEscapeRejected(t *testing.T) {
+	envs := newTestEnvs(t)
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.png")
+	writeTestPNG(t, secret, false)
+	link := filepath.Join(envs[0].Path, "output", "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := resolveAssetPath(envs, "lounge", "output", "escape/secret.png"); err == nil {
+		t.Error("a symlinked directory must not be usable as an exit from the root")
+	}
+
+	// An env whose own root is a symlink must keep working.
+	real := t.TempDir()
+	writeTestPNG(t, filepath.Join(real, "output", "a.png"), false)
+	aliasParent := t.TempDir()
+	alias := filepath.Join(aliasParent, "alias")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Fatal(err)
+	}
+	linked := []Env{{Name: "linked", Path: alias}}
+	if _, err := resolveAssetPath(linked, "linked", "output", "a.png"); err != nil {
+		t.Errorf("symlinked env root should still resolve: %v", err)
+	}
+	// Not-yet-created destinations (mkdir/rename/copy targets) must resolve too.
+	if _, err := resolveAssetPath(linked, "linked", "output", "new/dir/b.png"); err != nil {
+		t.Errorf("new file destination should resolve: %v", err)
+	}
+}
+
+func TestMutatingRequiresJSON(t *testing.T) {
+	envs := newTestEnvs(t)
+	srv := httptest.NewServer(NewServer(envs, t.TempDir()).Handler())
+	defer srv.Close()
+
+	// A cross-origin form post (text/plain) must not be able to wipe assets.
+	body := `{"filter":{}}`
+	r, err := http.Post(srv.URL+"/api/delete", "text/plain", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode < 400 {
+		t.Errorf("text/plain POST accepted with status %d", r.StatusCode)
+	}
+
+	// A JSON post carrying a foreign Origin is rejected too.
+	req, _ := http.NewRequest("POST", srv.URL+"/api/delete", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://evil.example")
+	r2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusForbidden {
+		t.Errorf("cross-origin POST returned %d, want 403", r2.StatusCode)
+	}
+
+	if left := scan(envs, "lounge", "output"); len(left) != 2 {
+		t.Fatalf("assets were deleted by a rejected request: %d left", len(left))
+	}
+}
+
+func TestGridOffsetBeyondEnd(t *testing.T) {
+	envs := newTestEnvs(t)
+	srv := httptest.NewServer(NewServer(envs, t.TempDir()).Handler())
+	defer srv.Close()
+
+	for _, path := range []string{"/grid?env=lounge&type=output&offset=9999", "/api/assets?env=lounge&type=output&offset=9999"} {
+		r, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if r.StatusCode != 200 {
+			t.Errorf("%s returned %d, want 200", path, r.StatusCode)
+		}
+	}
+}
+
+func TestFileServingHeaders(t *testing.T) {
+	envs := newTestEnvs(t)
+	if err := os.WriteFile(filepath.Join(envs[0].Path, "output", "evil.html"), []byte("<script>alert(1)</script>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(NewServer(envs, t.TempDir()).Handler())
+	defer srv.Close()
+
+	r, err := http.Get(srv.URL + "/api/file?env=lounge&type=output&path=evil.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("nosniff header missing")
+	}
+	if !strings.HasPrefix(r.Header.Get("Content-Disposition"), "attachment") {
+		t.Errorf("unknown type should be served as attachment, got %q", r.Header.Get("Content-Disposition"))
+	}
+
+	r2, err := http.Get(srv.URL + "/api/file?env=lounge&type=output&path=gen_001.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.Body.Close()
+	if r2.Header.Get("Content-Disposition") != "" {
+		t.Error("images must stay inline for the lightbox")
+	}
+}
+
 func TestEmptyTrash(t *testing.T) {
 	envs := newTestEnvs(t)
 	if err := moveToTrash(envs, "lounge", "output", "gen_001.png"); err != nil {
