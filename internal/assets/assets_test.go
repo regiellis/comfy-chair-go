@@ -433,7 +433,7 @@ func TestHTMLViewsAndFilterBulk(t *testing.T) {
 	if code != 200 || !strings.Contains(body, `class="card"`) || !strings.Contains(body, "Today") {
 		t.Fatalf("grid fragment wrong: code=%d body=%s", code, body[:min(300, len(body))])
 	}
-	if !strings.Contains(body, "folderbar") || !strings.Contains(body, "📁 sub") {
+	if !strings.Contains(body, "folderbar") || !strings.Contains(body, "data-folder=\"sub\"") {
 		t.Fatal("grid should include the folder bar with the sub folder chip")
 	}
 

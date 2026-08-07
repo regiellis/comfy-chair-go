@@ -248,7 +248,7 @@ grid.addEventListener("error", (e) => {
   if (img.tagName === "IMG" && img.classList.contains("thumb")) {
     const div = document.createElement("div");
     div.className = "icon";
-    div.textContent = img.dataset.fallback || "🧩";
+    div.textContent = img.dataset.fallback || "FILE";
     img.replaceWith(div);
   }
 }, true);

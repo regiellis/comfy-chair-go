@@ -56,7 +56,7 @@ type LogAnalysis struct {
 
 // RunHealthChecks performs comprehensive health checks on the ComfyUI environment
 func RunHealthChecks() *HealthReport {
-	fmt.Println(TitleStyle.Render("🏥 ComfyUI Health Check"))
+	fmt.Println(TitleStyle.Render("ComfyUI Health Check"))
 
 	// Get active environment
 	inst, err := GetActiveComfyInstall()
@@ -666,7 +666,7 @@ func calculateOverallScore(checks []HealthCheck) int {
 
 // ShowHealthReport displays a comprehensive health report
 func ShowHealthReport() {
-	fmt.Println(TitleStyle.Render("🏥 ComfyUI Health Check Report"))
+	fmt.Println(TitleStyle.Render("ComfyUI Health Check Report"))
 
 	report := RunHealthChecks()
 
@@ -737,7 +737,7 @@ func ShowHealthReport() {
 			// Show suggestions for warnings and failures
 			if len(check.Suggestions) > 0 && check.Status != "pass" {
 				for _, suggestion := range check.Suggestions {
-					fmt.Printf("    💡 %s\n", InfoStyle.Render(suggestion))
+					fmt.Printf("    hint: %s\n", InfoStyle.Render(suggestion))
 				}
 			}
 		}
@@ -783,7 +783,7 @@ func ShowHealthMenu() {
 
 // showLogAnalysis displays detailed log file analysis
 func showLogAnalysis() {
-	fmt.Println(TitleStyle.Render("📋 Log File Analysis"))
+	fmt.Println(TitleStyle.Render("Log File Analysis"))
 
 	inst, err := GetActiveComfyInstall()
 	if err != nil || inst == nil {
@@ -819,7 +819,7 @@ func showLogAnalysis() {
 
 // showEnvironmentValidation validates environment configuration
 func showEnvironmentValidation() {
-	fmt.Println(TitleStyle.Render("🔧 Environment Validation"))
+	fmt.Println(TitleStyle.Render("Environment Validation"))
 
 	inst, err := GetActiveComfyInstall()
 	if err != nil || inst == nil {
@@ -853,7 +853,7 @@ func showEnvironmentValidation() {
 
 // showSystemDiagnostics displays system diagnostic information
 func showSystemDiagnostics() {
-	fmt.Println(TitleStyle.Render("🖥 System Diagnostics"))
+	fmt.Println(TitleStyle.Render("System Diagnostics"))
 
 	checks := checkSystemResources()
 	checks = append(checks, checkNetworkConnectivity()...)

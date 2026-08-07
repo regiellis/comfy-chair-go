@@ -48,14 +48,14 @@ func sizeHuman(n int64) string {
 }
 
 func newCardVM(a Asset) cardVM {
-	icon := "🧩"
+	icon := "FILE"
 	switch a.Kind {
 	case "image":
-		icon = "🖼"
+		icon = "IMG"
 	case "video":
-		icon = "🎬"
+		icon = "VID"
 	case "audio":
-		icon = "🎵"
+		icon = "AUD"
 	}
 	return cardVM{
 		Asset:        a,

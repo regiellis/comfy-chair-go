@@ -85,7 +85,7 @@ func (r *CLIRouter) Route(args []string) bool {
 
 	// Show dry-run message if enabled
 	if r.dryRun {
-		fmt.Println(WarningStyle.Render("🔍 DRY RUN MODE - No actual changes will be made"))
+		fmt.Println(WarningStyle.Render("DRY RUN MODE - No actual changes will be made"))
 		fmt.Println()
 	}
 

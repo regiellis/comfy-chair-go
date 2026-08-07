@@ -12,9 +12,9 @@
     <a href="#" class="crumb" data-folder="">{{.TypeLabel}}</a>
     {{range .Crumbs}} / <a href="#" class="crumb" data-folder="{{.Folder}}">{{.Name}}</a>{{end}}
   </span>
-  {{range .Subfolders}}<button type="button" class="folderchip" data-folder="{{.Folder}}">📁 {{.Name}}<span class="chipdel" data-delfolder="{{.Folder}}" title="Delete folder…">✕</span></button>{{end}}
+  {{range .Subfolders}}<button type="button" class="folderchip" data-folder="{{.Folder}}">{{.Name}}<span class="chipdel" data-delfolder="{{.Folder}}" title="Delete folder…">✕</span></button>{{end}}
   <button type="button" class="folderchip newfolder" id="newFolderBtn">＋ New folder</button>
-  <button type="button" class="folderchip newfolder" id="cleanFoldersBtn" title="Remove all folders that contain no files">🧹 Remove empty folders</button>
+  <button type="button" class="folderchip newfolder" id="cleanFoldersBtn" title="Remove all folders that contain no files">Remove empty folders</button>
 </div>{{end}}
 <div id="gridStatus" class="gridstatus">{{.Total}} item(s){{if .Query}} matching “{{.Query}}”{{end}}</div>{{end}}
 {{range .Groups}}{{if .Label}}<h3 class="grouphead">{{.Label}}</h3>{{end}}<div class="bento">

@@ -209,7 +209,7 @@ func CalculatePerformanceSummary(history *PerformanceHistory) *PerformanceSummar
 
 // ShowPerformanceReport displays a comprehensive performance report
 func ShowPerformanceReport() {
-	fmt.Println(TitleStyle.Render("📊 ComfyUI Performance Report"))
+	fmt.Println(TitleStyle.Render("ComfyUI Performance Report"))
 
 	history, err := LoadPerformanceHistory()
 	if err != nil {
@@ -227,24 +227,24 @@ func ShowPerformanceReport() {
 	summary := CalculatePerformanceSummary(history)
 
 	// Overall Statistics
-	fmt.Println(SuccessStyle.Render("\n📈 Overall Statistics"))
+	fmt.Println(SuccessStyle.Render("\nOverall Statistics"))
 	fmt.Printf("  Total Sessions: %d\n", summary.TotalSessions)
 	fmt.Printf("  Sessions This Week: %d\n", summary.LastWeekSessions)
 	fmt.Printf("  Most Used Environment: %s\n", summary.MostUsedEnv)
 
 	// Startup Performance
-	fmt.Println(SuccessStyle.Render("\n🚀 Startup Performance"))
+	fmt.Println(SuccessStyle.Render("\nStartup Performance"))
 	fmt.Printf("  Average Startup Time: %v\n", summary.AverageStartupTime.Round(time.Millisecond))
 	fmt.Printf("  Fastest Startup: %v\n", summary.MinStartupTime.Round(time.Millisecond))
 	fmt.Printf("  Slowest Startup: %v\n", summary.MaxStartupTime.Round(time.Millisecond))
 
 	// Memory Usage
-	fmt.Println(SuccessStyle.Render("\n💾 Memory Usage"))
+	fmt.Println(SuccessStyle.Render("\nMemory Usage"))
 	fmt.Printf("  Average Memory: %.1f MB\n", summary.AverageMemoryMB)
 	fmt.Printf("  Peak Memory: %.1f MB\n", summary.MaxMemoryMB)
 
 	// Recent Activity (last 10 sessions)
-	fmt.Println(SuccessStyle.Render("\n📅 Recent Activity (Last 10 Sessions)"))
+	fmt.Println(SuccessStyle.Render("\nRecent Activity (Last 10 Sessions)"))
 	recent := history.Metrics
 	if len(recent) > 10 {
 		recent = recent[len(recent)-10:]
@@ -266,7 +266,7 @@ func ShowPerformanceReport() {
 	}
 
 	if len(envCounts) > 1 {
-		fmt.Println(SuccessStyle.Render("\n🏠 Environment Usage"))
+		fmt.Println(SuccessStyle.Render("\nEnvironment Usage"))
 		for env, count := range envCounts {
 			percentage := float64(count) / float64(len(history.Metrics)) * 100
 			fmt.Printf("  %s: %d sessions (%.1f%%)\n", env, count, percentage)

@@ -10,7 +10,7 @@
 </head>
 <body>
 <header>
-  <h1>🪑 Comfy Chair Assets</h1>
+  <h1>Comfy Chair Assets</h1>
   <form id="filters" hx-get="/grid" hx-target="#grid" hx-swap="innerHTML"
         hx-trigger="change, input delay:300ms from:[name=q], refresh-grid from:body"
         onsubmit="return false">
@@ -35,9 +35,9 @@
       <span class="dateCtl" title="Date range">
         <input name="from" type="date"> – <input name="to" type="date">
       </span>
-      <span class="sizeCtl" title="Thumbnail size">🔍<input id="sizeRange" type="range" min="140" max="440" step="50" value="440"></span>
+      <span class="sizeCtl" title="Thumbnail size"><input id="sizeRange" type="range" min="140" max="440" step="50" value="440"></span>
       <button type="button" id="dupesBtn" hx-get="/dupes" hx-include="#filters" hx-target="#grid" hx-swap="innerHTML" title="Find byte-identical duplicates in the current scope">⧉ Dupes</button>
-      <button type="button" id="emptyTrash" class="danger" title="Permanently delete trashed items for the current tab/environment">🗑</button>
+      <button type="button" id="emptyTrash" class="danger" title="Permanently delete trashed items for the current tab/environment">Trash</button>
     </div>
   </form>
 </header>

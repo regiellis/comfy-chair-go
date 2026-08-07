@@ -92,17 +92,17 @@ class {{NodeName}}UIController {
         controls.style.cssText = "display: flex; gap: 8px;";
 
         // Preview toggle
-        const previewToggle = this.createButton("👁", "Toggle Preview", () => {
+        const previewToggle = this.createButton("Preview", "Toggle Preview", () => {
             this.togglePreview();
         });
 
         // Settings toggle
-        const settingsToggle = this.createButton("⚙", "Settings", () => {
+        const settingsToggle = this.createButton("Settings", "Settings", () => {
             this.toggleSettings();
         });
 
         // Reset button
-        const resetButton = this.createButton("🔄", "Reset", () => {
+        const resetButton = this.createButton("Reset", "Reset", () => {
             this.resetSettings();
         });
 
