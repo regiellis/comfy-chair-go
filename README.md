@@ -27,24 +27,24 @@
 
 ---
 
-## ✨ Why Comfy Chair?
+## Why Comfy Chair?
 
-- 🚀 **V3 Node Scaffolding:** Instantly create ComfyUI custom nodes targeting the **V3 node schema** (`comfy_api.latest`: `IO.ComfyNode` subclasses with `define_schema()`, classmethod `execute()`, and a `ComfyExtension` entrypoint). Five templates: basic, advanced, API, model-loader, and web/API.
-- 🏘️ **Multiple Environments:** Manage several named ComfyUI installs (`lounge`, `den`, `nook`, or custom) from one tool, with a default environment, per-command environment selection, and `WORKING_COMFY_ENV` pinning.
-- 🛠️ **ComfyUI Management:** Start, stop, restart, update (stable, nightly, or downgrade to a tag), and install ComfyUI from the CLI.
-- 🔄 **Live Reload:** Watch selected custom node directories and auto-restart ComfyUI on code changes, with a real trailing debounce, symlink support, and log tailing.
-- 🗂️ **Asset Manager:** A local web UI for browsing and managing outputs, inputs, and workflows across every registered environment.
-- 📦 **Node Packaging & Updates:** Pack nodes into zips; update nodes via `git pull` + requirements install into the correct venv.
-- 🚚 **Migration Tools:** Copy custom nodes, workflows, and input images between environments.
-- ⚡ **UV-Powered:** Python dependencies are managed with [uv](https://github.com/astral-sh/uv) for fast installs, with GPU-specific PyTorch selection.
-- 💻 **Cross-Platform:** Linux, macOS, and Windows binaries built on every release.
-- 🛡️ **Safety Rails:** Path traversal protection, command-injection safeguards, atomic config writes, PID identity checks before signalling, and a global `--dry-run` preview for destructive commands.
+- **V3 Node Scaffolding:** Instantly create ComfyUI custom nodes targeting the **V3 node schema** (`comfy_api.latest`: `IO.ComfyNode` subclasses with `define_schema()`, classmethod `execute()`, and a `ComfyExtension` entrypoint). Five templates: basic, advanced, API, model-loader, and web/API.
+- **Multiple Environments:** Manage several named ComfyUI installs (`lounge`, `den`, `nook`, or custom) from one tool, with a default environment, per-command environment selection, and `WORKING_COMFY_ENV` pinning.
+- **ComfyUI Management:** Start, stop, restart, update (stable, nightly, or downgrade to a tag), and install ComfyUI from the CLI.
+- **Live Reload:** Watch selected custom node directories and auto-restart ComfyUI on code changes, with a real trailing debounce, symlink support, and log tailing.
+- **Asset Manager:** A local web UI for browsing and managing outputs, inputs, and workflows across every registered environment.
+- **Node Packaging & Updates:** Pack nodes into zips; update nodes via `git pull` + requirements install into the correct venv.
+- **Migration Tools:** Copy custom nodes, workflows, and input images between environments.
+- **UV-Powered:** Python dependencies are managed with [uv](https://github.com/astral-sh/uv) for fast installs, with GPU-specific PyTorch selection.
+- **Cross-Platform:** Linux, macOS, and Windows binaries built on every release.
+- **Safety Rails:** Path traversal protection, command-injection safeguards, atomic config writes, PID identity checks before signalling, and a global `--dry-run` preview for destructive commands.
 
 ### Install in Realtime
 
 ![Install Demo](demos/demo-install.gif)
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Download a Release
 
@@ -68,7 +68,7 @@ go build -o comfy-chair .   # or: task build
 
 Run `comfy-chair` with no arguments for the interactive TUI menu; every feature is reachable from there as well as from the CLI commands below.
 
-## 📖 Commands
+## Commands
 
 ```bash
 comfy-chair <command> [arguments...]
@@ -124,7 +124,7 @@ All commands accept both `snake_case` and `kebab-case` (e.g. `create_node` / `cr
 | version     | Print the Comfy Chair version                                |
 | help        | Show usage (also `--help`, `-h`)                             |
 
-## 🏘️ Multi-Environment Model
+## Multi-Environment Model
 
 Comfy Chair manages any number of named ComfyUI installs, registered in `comfy-installs.json`:
 
@@ -133,7 +133,7 @@ Comfy Chair manages any number of named ComfyUI installs, registered in `comfy-i
 - Set `WORKING_COMFY_ENV=<name>` in `.env` (or use *Set Working Environment* in the TUI) to pin the active environment and skip the prompt.
 - The migration commands move nodes, workflows, and images between environments.
 
-## 🗂️ Asset Manager
+## Asset Manager
 
 `comfy-chair assets` starts a local web UI that browses `output/`, `input/`, and `user/default/workflows/` across **all** registered environments: bento-grid thumbnails (video poster frames via ffmpeg when present), day grouping with infinite scroll, folder navigation/create/move/rename, date and name filters, bulk selection (shift-range, select-all-matching), hash-based duplicate review, copy/move between environments, delete to `.trash` with an empty-trash button, PNG metadata viewing, and one-click extraction of the workflow embedded in a generated PNG.
 
@@ -141,11 +141,11 @@ Comfy Chair manages any number of named ComfyUI installs, registered in `comfy-i
 - There is **no authentication**. On the default binding anyone on your network can manage your assets, and the CLI warns you about exactly that. Mutating requests are same-origin-only and thumbnails/metadata are generated with bounded resources, but treat the default binding as trusted-LAN only.
 - Trash can also be emptied non-interactively: `comfy-chair empty-trash [--env NAME] [--type TYPE] [--yes]`.
 
-## 🧩 Node Templates (V3 Schema)
+## Node Templates (V3 Schema)
 
 `create-node` scaffolds from five embedded templates: **basic**, **advanced** (rich UI + utils), **api** (external API integrations), **model** (model loading), and **webapi** (floating panel + HTTP endpoints). All templates target the **ComfyUI V3 node schema** (`IO.ComfyNode` subclasses with `define_schema()`, typed `IO.*` inputs/outputs, classmethod `execute()`, and registration through a `ComfyExtension` with `comfy_entrypoint()`), which requires **ComfyUI >= 0.10.0**. Placeholders (node name, author, publisher ID) are filled from your prompts and `.env` (`CUSTOM_NODES_AUTHOR`, `CUSTOM_NODES_PUBID`), including in file names, and a starter example workflow is generated alongside the node.
 
-## ⚙️ Configuration
+## Configuration
 
 State lives in your OS config directory (`~/.config/comfy-chair/` on Linux, the equivalent on macOS/Windows): `.env`, `comfy-installs.json`, and `comfy-performance-history.json`. Legacy binary-adjacent files are migrated there automatically on first use. Pid and log files live inside each ComfyUI install directory.
 
@@ -191,11 +191,11 @@ During install, Comfy Chair prompts for your GPU type and Python version, then i
 
 The Nvidia default is `uv pip install --index-url https://download.pytorch.org/whl/nightly/cu130 torch torchvision torchaudio`. If PyTorch's index moves again, override `TORCH_INSTALL_CMD_NVIDIA` in `.env` instead of waiting for a new Comfy Chair build.
 
-## 🔒 venv Detection (By Design)
+## venv Detection (By Design)
 
 Only virtual environments named exactly `venv` or `.venv` inside the ComfyUI directory are recognized, on every platform. **Custom venv names are intentionally unsupported.** If you see "Python executable not found in venv", make sure your venv uses one of those two names, or re-run the install command to create one.
 
-## 🔄 Live Reload Notes
+## Live Reload Notes
 
 - Watching is **opt-in per directory**: run `watch-nodes` (or *Select Watched Nodes for Reload* in the TUI) to pick which node directories trigger restarts. The selection is stored per environment in `comfy-installs.json` as `reload_include_dirs`.
 - Symlinked node directories are resolved and watched; directories created while watching are picked up automatically.
@@ -214,10 +214,10 @@ comfy-chair pack-node               # zip it for distribution
 comfy-chair assets                  # manage generated assets in the browser
 ```
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please fork, branch, and submit a PR. Ensure your code is formatted (`gofmt`) and builds cleanly (`task build`), and that `go vet ./...` and `go test ./...` pass.
 
-## 📜 License
+## License
 
 This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
