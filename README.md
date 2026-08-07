@@ -135,12 +135,12 @@ Comfy Chair manages any number of named ComfyUI installs, registered in `comfy-i
 `comfy-chair assets` starts a local web UI that browses `output/`, `input/`, and `user/default/workflows/` across **all** registered environments: bento-grid thumbnails (video poster frames via ffmpeg when present), day grouping with infinite scroll, folder navigation/create/move/rename, date and name filters, bulk selection (shift-range, select-all-matching), hash-based duplicate review, copy/move between environments, delete to `.trash` with an empty-trash button, PNG metadata viewing, and one-click extraction of the workflow embedded in a generated PNG.
 
 - Binding: defaults to **all interfaces** (`0.0.0.0`) and auto-picks a port from 8189. Use `--host 127.0.0.1` to restrict to this machine, `--port N` to pin a port, or the `COMFY_ASSETS_HOST` / `COMFY_ASSETS_PORT` env vars.
-- There is **no authentication** — on the default binding anyone on your network can manage your assets, and the CLI warns you about exactly that. Mutating requests are same-origin-only and thumbnails/metadata are generated with bounded resources, but treat the default binding as trusted-LAN only.
+- There is **no authentication**. On the default binding anyone on your network can manage your assets, and the CLI warns you about exactly that. Mutating requests are same-origin-only and thumbnails/metadata are generated with bounded resources, but treat the default binding as trusted-LAN only.
 - Trash can also be emptied non-interactively: `comfy-chair empty-trash [--env NAME] [--type TYPE] [--yes]`.
 
 ## 🧩 Node Templates (V3 Schema)
 
-`create-node` scaffolds from five embedded templates: **basic**, **advanced** (rich UI + utils), **api** (external API integrations), **model** (model loading), and **webapi** (floating panel + HTTP endpoints). All templates target the **ComfyUI V3 node schema** — `IO.ComfyNode` subclasses with `define_schema()`, typed `IO.*` inputs/outputs, classmethod `execute()`, and registration through a `ComfyExtension` with `comfy_entrypoint()` — which requires **ComfyUI >= 0.10.0**. Placeholders (node name, author, publisher ID) are filled from your prompts and `.env` (`CUSTOM_NODES_AUTHOR`, `CUSTOM_NODES_PUBID`), including in file names, and a starter example workflow is generated alongside the node.
+`create-node` scaffolds from five embedded templates: **basic**, **advanced** (rich UI + utils), **api** (external API integrations), **model** (model loading), and **webapi** (floating panel + HTTP endpoints). All templates target the **ComfyUI V3 node schema** (`IO.ComfyNode` subclasses with `define_schema()`, typed `IO.*` inputs/outputs, classmethod `execute()`, and registration through a `ComfyExtension` with `comfy_entrypoint()`), which requires **ComfyUI >= 0.10.0**. Placeholders (node name, author, publisher ID) are filled from your prompts and `.env` (`CUSTOM_NODES_AUTHOR`, `CUSTOM_NODES_PUBID`), including in file names, and a starter example workflow is generated alongside the node.
 
 ## ⚙️ Configuration
 
@@ -190,7 +190,7 @@ The Nvidia default is `uv pip install --index-url https://download.pytorch.org/w
 
 ## 🔒 venv Detection (By Design)
 
-Only virtual environments named exactly `venv` or `.venv` inside the ComfyUI directory are recognized, on every platform. **Custom venv names are intentionally unsupported** — if you see "Python executable not found in venv", make sure your venv uses one of those two names, or re-run the install command to create one.
+Only virtual environments named exactly `venv` or `.venv` inside the ComfyUI directory are recognized, on every platform. **Custom venv names are intentionally unsupported.** If you see "Python executable not found in venv", make sure your venv uses one of those two names, or re-run the install command to create one.
 
 ## 🔄 Live Reload Notes
 
