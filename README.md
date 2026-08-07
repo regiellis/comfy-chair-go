@@ -4,6 +4,9 @@
 ![Styled with Lipgloss](https://img.shields.io/badge/UI-Lipgloss-F5A9B8)
 ![Prompts by Huh](https://img.shields.io/badge/Prompts-Huh-AF87FF)
 ![ComfyUI Required](https://img.shields.io/badge/ComfyUI-Required-FFD700?logo=python&logoColor=white)
+[![Docs](https://img.shields.io/badge/Docs-regiellis.github.io-4C9A2A)](https://regiellis.github.io/comfy-chair-go/)
+
+**Detailed documentation:** [regiellis.github.io/comfy-chair-go](https://regiellis.github.io/comfy-chair-go/)
 
 ---
 
