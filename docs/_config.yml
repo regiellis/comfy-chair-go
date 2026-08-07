@@ -1,0 +1,12 @@
+title: Comfy Chair
+description: A single-binary CLI for managing ComfyUI installs and developing custom nodes
+remote_theme: just-the-docs/just-the-docs
+color_scheme: dark
+search_enabled: true
+heading_anchors: true
+aux_links:
+  GitHub: https://github.com/regiellis/comfy-chair-go
+  Releases: https://github.com/regiellis/comfy-chair-go/releases
+nav_external_links:
+  - title: ComfyUI
+    url: https://github.com/comfyanonymous/ComfyUI
