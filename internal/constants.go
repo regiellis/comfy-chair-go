@@ -21,15 +21,20 @@ const (
 
 // Environment variable constants
 const (
-	ComfyUIPathKey     = "COMFYUI_PATH"
-	WorkingComfyEnvKey = "WORKING_COMFY_ENV"
-	ComfyStartFlagsKey = "COMFY_START_FLAGS"
+	ComfyUIPathKey          = "COMFYUI_PATH"
+	WorkingComfyEnvKey      = "WORKING_COMFY_ENV"
+	ComfyStartFlagsKey      = "COMFY_START_FLAGS"
+	ComfyFrontendVersionKey = "COMFY_FRONTEND_VERSION"
 )
 
 // Default values
 const (
-	AppVersion           = "1.7.0"
+	AppVersion           = "1.7.1"
 	DefaultPythonVersion = "3.13"
+
+	// DefaultFrontendVersion is passed to --front-end-version when
+	// COMFY_FRONTEND_VERSION is unset. "default" selects the bundled frontend.
+	DefaultFrontendVersion = "v1.55.9"
 
 	// ComfyUI repository
 	ComfyUIRepoURL = "https://github.com/comfyanonymous/ComfyUI.git"

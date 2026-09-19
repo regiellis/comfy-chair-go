@@ -47,7 +47,7 @@ Comfy Chair manages **multiple named ComfyUI installs** (`lounge`, `den`, `nook`
 ### Configuration
 
 - State files (`.env`, `comfy-installs.json`, `comfy-performance-history.json`) live in **`os.UserConfigDir()/comfy-chair/`** (e.g. `~/.config/comfy-chair/`), resolved via `internal.ResolveStateFile`, which one-time copy-migrates files from the legacy binary-adjacent location. Pid/log files (`comfyui.pid`, `comfyui.log`) live in the ComfyUI install directory.
-- **`.env`** (loaded via `godotenv`): `COMFYUI_PATH` (required), `COMFY_RELOAD_EXTS`, `COMFY_RELOAD_DEBOUNCE`, `COMFY_START_FLAGS`, `GPU_TYPE`, `PYTHON_VERSION`, `TORCH_INSTALL_CMD_NVIDIA`, `CUSTOM_NODES_AUTHOR`, `CUSTOM_NODES_PUBID`, `WORKING_COMFY_ENV`. Missing required vars trigger interactive setup. Copy from `.env.example`.
+- **`.env`** (loaded via `godotenv`): `COMFYUI_PATH` (required), `COMFY_RELOAD_EXTS`, `COMFY_RELOAD_DEBOUNCE`, `COMFY_START_FLAGS`, `COMFY_FRONTEND_VERSION`, `GPU_TYPE`, `PYTHON_VERSION`, `TORCH_INSTALL_CMD_NVIDIA`, `CUSTOM_NODES_AUTHOR`, `CUSTOM_NODES_PUBID`, `WORKING_COMFY_ENV`. Missing required vars trigger interactive setup. Copy from `.env.example`.
 - **`comfy-installs.json`**: the multi-environment registry described above.
 - Paths in config support portable placeholders `{HOME}` / `{USERPROFILE}` (resolved in `internal.ExpandUserPath`).
 

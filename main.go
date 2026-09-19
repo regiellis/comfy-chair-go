@@ -206,7 +206,17 @@ func startComfyUI(inst *internal.ComfyInstall, background bool) {
 		return
 	}
 
-	args := []string{"-s", mainPy, "--listen", "--port", fmt.Sprintf("%d", chosenPort), "--preview-method", "auto", "--front-end-version", "Comfy-Org/ComfyUI_frontend@latest"}
+	// Frontend version: pinned stable by default (cached locally, no per-start
+	// GitHub dependency). "default" selects ComfyUI's bundled frontend.
+	frontendVersion := strings.TrimSpace(os.Getenv(internal.ComfyFrontendVersionKey))
+	if frontendVersion == "" {
+		frontendVersion = internal.DefaultFrontendVersion
+	}
+
+	args := []string{"-s", mainPy, "--listen", "--port", fmt.Sprintf("%d", chosenPort), "--preview-method", "auto"}
+	if frontendVersion != "default" {
+		args = append(args, "--front-end-version", "Comfy-Org/ComfyUI_frontend@"+frontendVersion)
+	}
 	extraFlags := strings.TrimSpace(os.Getenv(internal.ComfyStartFlagsKey))
 	if extraFlags == "" {
 		args = append(args, "--cuda-malloc")
