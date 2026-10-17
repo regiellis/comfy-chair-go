@@ -206,8 +206,9 @@ func startComfyUI(inst *internal.ComfyInstall, background bool) {
 		return
 	}
 
-	// Frontend version: pinned stable by default (cached locally, no per-start
-	// GitHub dependency). "default" selects ComfyUI's bundled frontend.
+	// Frontend version: "default" (when unset) selects ComfyUI's bundled
+	// frontend (comfyui-frontend-package pip package). Set COMFY_FRONTEND_VERSION
+	// to a tag (v1.55.17) or "latest" to pin a specific frontend.
 	frontendVersion := strings.TrimSpace(os.Getenv(internal.ComfyFrontendVersionKey))
 	if frontendVersion == "" {
 		frontendVersion = internal.DefaultFrontendVersion

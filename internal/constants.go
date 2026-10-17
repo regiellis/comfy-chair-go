@@ -32,9 +32,10 @@ const (
 	AppVersion           = "1.7.1"
 	DefaultPythonVersion = "3.13"
 
-	// DefaultFrontendVersion is passed to --front-end-version when
-	// COMFY_FRONTEND_VERSION is unset. "default" selects the bundled frontend.
-	DefaultFrontendVersion = "v1.55.9"
+	// DefaultFrontendVersion is used when COMFY_FRONTEND_VERSION is unset.
+	// "default" selects the bundled frontend (the comfyui-frontend-package
+	// pip package), which tracks the version pinned in requirements.txt.
+	DefaultFrontendVersion = "default"
 
 	// ComfyUI repository
 	ComfyUIRepoURL = "https://github.com/comfyanonymous/ComfyUI.git"
